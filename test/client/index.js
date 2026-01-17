@@ -1,66 +1,55 @@
 const WebSocket = require('ws');
 const readline = require('readline');
+const zlib = require('zlib');
 
-// Use the IPv4 address we verified earlier
 const url = 'ws://127.0.0.1:8080/socket';
-const options = {
+const ws = new WebSocket(url, {
     headers: { 'Origin': 'http://127.0.0.1:8080' }
-};
+});
 
-const ws = new WebSocket(url, options);
+// Create a persistent decompressor to handle "Context Takeover"
+const decompressor = zlib.createInflateRaw();
 
-// Set up the terminal interface
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: 'DCSS> '
 });
 
+// Handle the decompressed data coming out of the zlib stream
+decompressor.on('data', (chunk) => {
+    const messageString = chunk.toString();
+    try {
+        const json = JSON.parse(messageString);
+        // Filter out the noisy map updates
+        if (!['vgrdc', 'map', 'viewport'].includes(json.msg)) {
+            console.log(`\n[Server]:`, JSON.stringify(json, null, 2));
+            rl.prompt();
+        } else {
+            process.stdout.write('.'); // Heartbeat for map data
+        }
+    } catch (e) {
+        console.log(`\n[Decompressed Text (Partial?)]: ${messageString}`);
+    }
+});
+
 ws.on('open', () => {
-    console.log('✅ Connected to DCSS Webtiles');
-    console.log('Type your JSON and press Enter. (e.g., {"msg":"play","game_id":"crawl-0.31"})\n');
+    console.log('✅ Connected. Forcing Manual Decompression...');
+    ws.send(JSON.stringify({ msg: "client_id", id: "web" }));
     rl.prompt();
 });
 
 ws.on('message', (data) => {
-    try {
-        const msg = JSON.parse(data.toString());
-        
-        // Filter out the massive tile data (vgrdc) to keep the terminal readable
-        if (msg.msg !== 'vgrdc' && msg.msg !== 'map') {
-            process.stdout.write(`\r\x1b[K`); // Clear current line
-            console.log(`\n[Server]:`, JSON.stringify(msg, null, 2));
-            rl.prompt();
-        } else {
-            // Optional: Just print a tiny indicator that map data was received
-            process.stdout.write('.'); 
-        }
-
-        // Auto-respond to pings to prevent timeout
-        if (msg.msg === 'ping') {
-            ws.send(JSON.stringify({ msg: 'pong' }));
-        }
-    } catch (e) {
-        console.log('\n[Raw Data]:', data.toString());
-    }
+    // WebSockets with per-message deflate append 00 00 ff ff to every frame
+    // Manual zlib streams need this to know a block has ended.
+    const syncBuffer = Buffer.from([0x00, 0x00, 0xff, 0xff]);
+    decompressor.write(data);
+    decompressor.write(syncBuffer);
 });
 
 rl.on('line', (line) => {
-    const input = line.trim();
-    if (input) {
-        try {
-            // Validate it is JSON before sending
-            JSON.parse(input); 
-            ws.send(input);
-        } catch (e) {
-            console.log('❌ Invalid JSON. Format: {"msg":"...", ...}');
-        }
-    }
+    if (line.trim()) ws.send(line.trim());
     rl.prompt();
 });
 
-ws.on('error', (err) => console.error('\n❌ WebSocket Error:', err.message));
-ws.on('close', () => {
-    console.log('\n🔌 Connection closed');
-    process.exit();
-});
+ws.on('close', () => process.exit());
