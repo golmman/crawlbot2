@@ -1,0 +1,196 @@
+{
+    "msgs": [
+        {
+            "msg": "options",
+            "options": {
+                "hp_colour": [
+                    {
+                        "value": 70,
+                        "colour": "yellow"
+                    },
+                    {
+                        "value": 40,
+                        "colour": "red"
+                    }
+                ],
+                "mp_colour": [
+                    {
+                        "value": 50,
+                        "colour": "yellow"
+                    },
+                    {
+                        "value": 25,
+                        "colour": "red"
+                    }
+                ],
+                "stat_colour": [
+                    {
+                        "value": 3,
+                        "colour": "red"
+                    }
+                ],
+                "custom_text_colours": [],
+                "tile_show_minihealthbar": true,
+                "tile_show_minimagicbar": true,
+                "tile_show_demon_tier": false,
+                "tile_map_pixels": 0,
+                "tile_display_mode": "tiles",
+                "tile_cell_pixels": 32,
+                "tile_viewport_scale": 100,
+                "tile_map_scale": 60,
+                "tile_filter_scaling": false,
+                "tile_water_anim": false,
+                "tile_misc_anim": true,
+                "tile_realtime_anim": false,
+                "tile_level_map_hide_messages": true,
+                "tile_level_map_hide_sidebar": false,
+                "tile_web_mouse_control": true,
+                "tile_web_mobile_input_helper": "auto",
+                "tile_menu_icons": true,
+                "tile_font_crt_family": "monospace",
+                "tile_font_stat_family": "monospace",
+                "tile_font_msg_family": "monospace",
+                "tile_font_lbl_family": "monospace",
+                "tile_font_crt_size": 0,
+                "tile_font_stat_size": 0,
+                "tile_font_msg_size": 0,
+                "tile_font_lbl_size": 0,
+                "glyph_mode_font": "monospace",
+                "glyph_mode_font_size": 24,
+                "show_game_time": true,
+                "action_panel_disabled": false,
+                "action_panel_show": true,
+                "action_panel_scale": 100,
+                "action_panel_orientation": "horizontal",
+                "action_panel_font_family": "monospace",
+                "action_panel_font_size": 16,
+                "action_panel_glyphs": false,
+                "tile_unseen_col": {
+                    "r": 0,
+                    "g": 0,
+                    "b": 0
+                },
+                "tile_floor_col": {
+                    "r": 51,
+                    "g": 51,
+                    "b": 51
+                },
+                "tile_wall_col": {
+                    "r": 102,
+                    "g": 102,
+                    "b": 102
+                },
+                "tile_mapped_floor_col": {
+                    "r": 34,
+                    "g": 34,
+                    "b": 102
+                },
+                "tile_mapped_wall_col": {
+                    "r": 68,
+                    "g": 68,
+                    "b": 153
+                },
+                "tile_door_col": {
+                    "r": 119,
+                    "g": 85,
+                    "b": 68
+                },
+                "tile_item_col": {
+                    "r": 0,
+                    "g": 85,
+                    "b": 68
+                },
+                "tile_monster_col": {
+                    "r": 102,
+                    "g": 0,
+                    "b": 0
+                },
+                "tile_plant_col": {
+                    "r": 68,
+                    "g": 102,
+                    "b": 51
+                },
+                "tile_upstairs_col": {
+                    "r": 0,
+                    "g": 255,
+                    "b": 255
+                },
+                "tile_downstairs_col": {
+                    "r": 255,
+                    "g": 0,
+                    "b": 255
+                },
+                "tile_branchstairs_col": {
+                    "r": 255,
+                    "g": 119,
+                    "b": 136
+                },
+                "tile_feature_col": {
+                    "r": 153,
+                    "g": 119,
+                    "b": 0
+                },
+                "tile_water_col": {
+                    "r": 17,
+                    "g": 68,
+                    "b": 85
+                },
+                "tile_lava_col": {
+                    "r": 85,
+                    "g": 34,
+                    "b": 17
+                },
+                "tile_trap_col": {
+                    "r": 170,
+                    "g": 102,
+                    "b": 68
+                },
+                "tile_excl_centre_col": {
+                    "r": 85,
+                    "g": 34,
+                    "b": 102
+                },
+                "tile_excluded_col": {
+                    "r": 85,
+                    "g": 34,
+                    "b": 102
+                },
+                "tile_player_col": {
+                    "r": 255,
+                    "g": 255,
+                    "b": 255
+                },
+                "tile_deep_water_col": {
+                    "r": 0,
+                    "g": 17,
+                    "b": 34
+                },
+                "tile_portal_col": {
+                    "r": 255,
+                    "g": 221,
+                    "b": 0
+                },
+                "tile_transporter_col": {
+                    "r": 0,
+                    "g": 0,
+                    "b": 255
+                },
+                "tile_transporter_landing_col": {
+                    "r": 82,
+                    "g": 0,
+                    "b": 170
+                },
+                "tile_explore_horizon_col": {
+                    "r": 107,
+                    "g": 48,
+                    "b": 27
+                },
+                "tile_window_col": {
+                    "r": 85,
+                    "g": 136,
+                    "b": 85
+                }
+            }
+        }
+    ]
+}

@@ -1,0 +1,11 @@
+{
+    "msgs": [
+        {
+            "msg": "layout",
+            "message_pane": {
+                "height": 7,
+                "small_more": false
+            }
+        }
+    ]
+}

@@ -1,38 +1,53 @@
 # crawlbot2
 
-Pong
+## DCSS Server Interface
+
+### Quick Start
+
+```json
+{"msg":"register","username":"dirkle","password":"aaa","email":""}
+{"msg":"login","username":"dirkle","password":"aaa"}
+{"msg":"play","game_id":"dcss-web-trunk"}
+{"msg": "input","text": "f"}
+{"msg": "input","text": "f"}
+{"msg": "input","text": "f"}
 ```
+
+### Commands
+
+Pong
+```json
 {"msg":"pong"}
 ```
 
 Register
-```
+```json
 {"msg":"register","username":"dirkle","password":"aaa","email":""}
 ```
 
 Login
-```
+```json
 {"msg":"login","username":"dirkle","password":"aaa"}
 ```
 
 Play
-```
+```json
 {"msg":"play","game_id":"dcss-web-trunk"}
 ```
 
 Pick TrBe
-```
-{"msg": "input","text": "g"}
-{"msg": "input","text": "h"}
+```json
+{"msg": "input","text": "f"}
+{"msg": "input","text": "f"}
 {"msg": "input","text": "f"}
 ```
 
 Explore
-```
+```json
 {"msg": "input","text": "o"}
 ```
 
-{"msg": "input","text": "j"}
-{"msg": "input","text": "j"}
-{"msg": "input","text": "j"}
+Move
+```json
 {"msg": "input","text": "l"}
+```

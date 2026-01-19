@@ -1,0 +1,19 @@
+{
+    "msgs": [
+        {
+            "msg": "msgs",
+            "messages": [
+                {
+                    "text": "<yellow>Welcome back, dirkle the Troll Berserker.<lightgrey>",
+                    "turn": 12,
+                    "channel": 0
+                },
+                {
+                    "text": "<lightred>Trog says: Kill them all!<lightgrey>",
+                    "turn": 12,
+                    "channel": 3
+                }
+            ]
+        }
+    ]
+}

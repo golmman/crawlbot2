@@ -1,0 +1,14 @@
+{
+    "msgs": [
+        {
+            "msg": "msgs",
+            "messages": [
+                {
+                    "text": "<lightgrey>Press <white>?<lightgrey> for a list of commands and other information.",
+                    "turn": 12,
+                    "channel": 0
+                }
+            ]
+        }
+    ]
+}
