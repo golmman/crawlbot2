@@ -1,60 +1,63 @@
-const map = {};
+const MAP_WIDTH = 200;
+const MAP_HEIGHT = 200;
+
+const map = {
+  width: MAP_WIDTH,
+  height: MAP_HEIGHT,
+  cells: new Array(MAP_WIDTH * MAP_HEIGHT),
+};
 
 export function updateMap(cells) {
   console.log("updateMap");
 
-  const i = mapZ2toN(6, 6);
+  const originX = Math.floor(map.width / 2);
+  const originY = Math.floor(map.height / 2);
+  let mapIndex = null;
 
-  for (let i = 0; i < 15; ++i) {
-    const [z1, z2] = inverseZ2(i);
-    const n = mapZ2toN(z1, z2);
-    //if (i !== n) {
-      console.log(`${[z1, z2]} - ${n}`);
-    //}
+  for (const cell of cells) {
+    if (typeof cell.x === "number") {
+      mapIndex = originX + cell.x + map.width * (originY + cell.y);
+    } else {
+      mapIndex += 1;
+    }
+
+    if (typeof cell.g === "string") {
+      map.cells[mapIndex] = cell.g;
+    }
   }
 }
 
 export function printMap() {
   console.log("printMap");
-}
 
-function mapZtoN(z) {
-  if (z >= 0) {
-    return 2 * z;
-  } else {
-    return -2 * z - 1;
+  let minX = map.width,
+    maxX = 0,
+    minY = map.height,
+    maxY = 0;
+
+  for (let y = 0; y < map.height; y += 1) {
+    for (let x = 0; x < map.width; x += 1) {
+      const i = x + y * map.width;
+      if (map.cells[i] !== undefined) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
   }
-}
 
-function mapCantorPairing(n1, n2) {
-  return n2 + ((n1 + n2) * (n1 + n2 + 1)) / 2;
-}
+  console.log(`${minX},${minY} - ${maxX},${maxY}`);
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const i = x + y * map.width;
+      if (map.cells[i] === undefined) {
+        process.stdout.write(" ");
+      } else {
+        process.stdout.write(map.cells[i]);
+      }
+    }
 
-function mapZ2toN(z1, z2) {
-  return mapCantorPairing(mapZtoN(z1), mapZtoN(z2));
-}
-
-function mapNtoZ2(n) {
-  const w = Math.floor((Math.sqrt(8 * n + 1) - 1) / 2);
-  const t = (w * (w + 1)) / 2;
-  const b = n - t;
-  const a = w - b;
-}
-
-function inverseZ2(n) {
-  if (!Number.isInteger(n) || n < 0)
-    throw new Error("n must be a nonnegative integer");
-
-  // Cantor inverse: recover a,b from n
-  const w = Math.floor((Math.sqrt(8 * n + 1) - 1) / 2);
-  const t = (w * (w + 1)) / 2;
-  const b = n - t;
-  const a = w - b;
-
-  // f^{-1}: map natural m back to integer
-  const fInv = (m) => (m % 2 === 0 ? m / 2 : -((m + 1) / 2));
-
-  const z1 = fInv(a);
-  const z2 = fInv(b);
-  return [z1, z2];
+    process.stdout.write("\n");
+  }
 }

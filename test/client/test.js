@@ -1,8 +1,14 @@
 const fs = require("fs");
 const map = require("./map.js");
 
-const raw = fs.readFileSync("../research/login/09-map.json", "utf8");
-const mapJson = JSON.parse(raw);
+const raw1 = fs.readFileSync("../research/login/09-map.json", "utf8");
+const mapJson1 = JSON.parse(raw1);
 
-map.updateMap(mapJson.msgs[0].cells)
+const raw2 = fs.readFileSync("../research/move/01-msgs.json", "utf8");
+const mapJson2 = JSON.parse(raw2);
+
+map.updateMap(mapJson1.msgs[0].cells)
+map.printMap();
+
+map.updateMap(mapJson2.msgs[3].cells)
 map.printMap();
