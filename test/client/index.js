@@ -1,6 +1,7 @@
 const WebSocket = require("ws");
 const readline = require("readline");
 const zlib = require("zlib");
+const JSONStream = require('JSONStream');
 
 const map = require("./map.js");
 
@@ -9,7 +10,8 @@ const ws = new WebSocket(url, {
   headers: { Origin: "http://127.0.0.1:8080" },
 });
 
-// Create a persistent decompressor to handle "Context Takeover"
+const parser = JSONStream.parse('*');
+
 const decompressor = zlib.createInflateRaw();
 
 const rl = readline.createInterface({
@@ -18,27 +20,31 @@ const rl = readline.createInterface({
   prompt: "DCSS> ",
 });
 
-// Handle the decompressed data coming out of the zlib stream
-decompressor.on("data", (chunk) => {
-  const messageString = chunk.toString();
-  try {
-    const json = JSON.parse(messageString);
-    console.log(`\n[Server]:`, JSON.stringify(json));
 
-    if (json.msgs[0].msg === "map") {
-      map.updateMap(json.msgs[0].cells);
+parser.on('data', (json) => {
+  try {
+    console.log('\n[Server]:', JSON.stringify(json));
+
+    const mapMessage = json.find(msg => msg.msg === 'map');
+    if (mapMessage) {
+      map.updateMap(mapMessage.cells);
       map.printMap();
     }
 
     rl.prompt();
-  } catch (e) {
-    console.log(`\n[Decompressed Text (Partial?)]: >${messageString}<`);
+  } catch (err) {
+    console.error('Error handling parsed JSON:', err);
   }
 });
 
+parser.on('error', (err) => {
+  console.error('JSON stream parse error:', err);
+});
+
+decompressor.pipe(parser);
+
 ws.on("open", () => {
-  console.log("✅ Connected. Forcing Manual Decompression...");
-  ws.send(JSON.stringify({ msg: "client_id", id: "web" }));
+  console.log("Connected. Forcing Manual Decompression...");
   rl.prompt();
 });
 
