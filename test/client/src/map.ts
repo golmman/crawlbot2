@@ -1,21 +1,33 @@
 const MAP_WIDTH = 200;
 const MAP_HEIGHT = 200;
 
-const map = {
+interface Cell {
+  x?: number;
+  y?: number;
+  g?: string;
+}
+
+interface MapState {
+  width: number;
+  height: number;
+  cells: (string | undefined)[];
+}
+
+const map: MapState = {
   width: MAP_WIDTH,
   height: MAP_HEIGHT,
   cells: new Array(MAP_WIDTH * MAP_HEIGHT),
 };
 
-export function updateMap(cells) {
+export function updateMap(cells: Cell[]) {
   console.log("updateMap");
 
   const originX = Math.floor(map.width / 2);
   const originY = Math.floor(map.height / 2);
-  let mapIndex = null;
+  let mapIndex: number = 0;
 
   for (const cell of cells) {
-    if (typeof cell.x === "number") {
+    if (typeof cell.x === "number" && typeof cell.y === "number") {
       mapIndex = originX + cell.x + map.width * (originY + cell.y);
     } else {
       mapIndex += 1;
@@ -54,7 +66,7 @@ export function printMap() {
       if (map.cells[i] === undefined) {
         process.stdout.write(" ");
       } else {
-        process.stdout.write(map.cells[i]);
+        process.stdout.write(map.cells[i]!);
       }
     }
 

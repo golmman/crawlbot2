@@ -1,12 +1,12 @@
-const WebSocket = require("ws");
-const readline = require("readline");
-const zlib = require("zlib");
-const JSONStream = require("JSONStream");
+import WebSocket from "ws";
+import readline from "readline";
+import zlib from "zlib";
+import JSONStream from "JSONStream";
 
-const map = require("./map.js");
-const { createMessage } = require("./commands.js");
+import * as map from "./map.ts";
+import { createMessage, type MessageHook } from "./commands.ts";
 
-const messageHook = { callback: null };
+const messageHook: MessageHook = { callback: null };
 
 const url = "ws://127.0.0.1:8080/socket";
 const ws = new WebSocket(url, {
@@ -17,10 +17,9 @@ const parser = JSONStream.parse("*");
 
 const decompressor = zlib.createInflateRaw();
 
+let currentCommand: ((inMsg: any) => { message: string, nextCommand: any }) | null = null;
 
-const currentCommand = null;
-
-function processMessage(inMsg) {
+function processMessage(inMsg: any) {
   if (!currentCommand) {
     return;
   }
@@ -37,15 +36,15 @@ const rl = readline.createInterface({
   prompt: `${new Date().toISOString()} DCSS    > `,
 });
 
-parser.on("data", (messages) => {
+parser.on("data", (messages: any[]) => {
   try {
     console.log(
       `\n${new Date().toISOString()} [Server]:`,
       JSON.stringify(messages),
     );
 
-    const mapMessage = messages.find((msg) => msg.msg === "map");
-    const pingMessage = messages.find((msg) => msg.msg === "ping");
+    const mapMessage = messages.find((msg: any) => msg.msg === "map");
+    const pingMessage = messages.find((msg: any) => msg.msg === "ping");
 
     if (mapMessage) {
       map.updateMap(mapMessage.cells);
@@ -68,7 +67,7 @@ parser.on("data", (messages) => {
   }
 });
 
-parser.on("error", (err) => {
+parser.on("error", (err: Error) => {
   console.error("JSON stream parse error:", err);
 });
 
@@ -79,7 +78,7 @@ ws.on("open", () => {
   rl.prompt();
 });
 
-ws.on("message", (data) => {
+ws.on("message", (data: Buffer) => {
   // WebSockets with per-message deflate append 00 00 ff ff to every frame
   // Manual zlib streams need this to know a block has ended.
   const syncBuffer = Buffer.from([0x00, 0x00, 0xff, 0xff]);
@@ -87,9 +86,9 @@ ws.on("message", (data) => {
   decompressor.write(syncBuffer);
 });
 
-rl.on("line", (line) => {
+rl.on("line", (line: string) => {
   if (line.startsWith("/")) {
-    const message = ""
+    const message = createMessage(line.trim(), messageHook);
     if (message.length > 0) ws.send(message);
   } else if (line.trim()) {
     ws.send(line.trim());
@@ -97,5 +96,7 @@ rl.on("line", (line) => {
 
   rl.prompt();
 });
+
+ws.on("close", () => process.exit());
 
 ws.on("close", () => process.exit());

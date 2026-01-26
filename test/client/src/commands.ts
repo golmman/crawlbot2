@@ -1,4 +1,8 @@
-export function createMessage(command, messageHook) {
+export interface MessageHook {
+  callback: ((messages: any[]) => void) | null;
+}
+
+export function createMessage(command: string, messageHook: MessageHook): string {
   let m = "";
 
   if (command === "/hook1") m = hook1(messageHook);
@@ -12,28 +16,28 @@ export function createMessage(command, messageHook) {
 // dispatcher
 // ping pong
 
-function hook1(messageHook) {
+function hook1(messageHook: MessageHook): string {
   console.log("hook1");
-  messageHook.callback = (messages) => {
+  messageHook.callback = (messages: any[]) => {
     console.log(`hook1 received ${messages.length} messages`);
   };
 
   return "";
 }
 
-function hook2(messageHook) {
+function hook2(messageHook: MessageHook): string {
   console.log("hook2");
-  messageHook.callback = (messages) => {
+  messageHook.callback = (messages: any[]) => {
     console.log(`hook2 received ${messages.length} messages`);
   };
 
   return "";
 }
 
-function start(messageHook) {
-  messageHook.callback = (messages) => {
+function start(messageHook: MessageHook): string {
+  messageHook.callback = (messages: any[]) => {
     console.log(`hook2 received ${messages.length} messages`);
   };
 
-  return JSON.stringify({"msg":"register","username":"dirkle","password":"aaa","email":""});
+  return JSON.stringify({ "msg": "register", "username": "dirkle", "password": "aaa", "email": "" });
 }
