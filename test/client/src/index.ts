@@ -6,6 +6,18 @@ import JSONStream from "JSONStream";
 import * as map from "./map.ts";
 import { createMessage, type MessageHook } from "./commands.ts";
 
+interface Cell {
+  x?: number;
+  y?: number;
+  g?: string;
+}
+
+interface GameMessage {
+  msg: string;
+  cells?: Cell[];
+  [key: string]: any;
+}
+
 const messageHook: MessageHook = { callback: null };
 
 const url = "ws://127.0.0.1:8080/socket";
@@ -13,22 +25,9 @@ const ws = new WebSocket(url, {
   headers: { Origin: "http://127.0.0.1:8080" },
 });
 
-const parser = JSONStream.parse("*");
+const parser: NodeJS.ReadWriteStream = JSONStream.parse("*");
 
 const decompressor = zlib.createInflateRaw();
-
-let currentCommand: ((inMsg: any) => { message: string, nextCommand: any }) | null = null;
-
-function processMessage(inMsg: any) {
-  if (!currentCommand) {
-    return;
-  }
-
-  const { message, nextCommand } = currentCommand(inMsg);
-
-  ws.send(JSON.stringify({ msg: "pong" }));
-  currentCommand = nextCommand;
-}
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -36,17 +35,17 @@ const rl = readline.createInterface({
   prompt: `${new Date().toISOString()} DCSS    > `,
 });
 
-parser.on("data", (messages: any[]) => {
+parser.on("data", (messages: GameMessage[]) => {
   try {
     console.log(
       `\n${new Date().toISOString()} [Server]:`,
       JSON.stringify(messages),
     );
 
-    const mapMessage = messages.find((msg: any) => msg.msg === "map");
-    const pingMessage = messages.find((msg: any) => msg.msg === "ping");
+    const mapMessage = messages.find((msg) => msg.msg === "map");
+    const pingMessage = messages.find((msg) => msg.msg === "ping");
 
-    if (mapMessage) {
+    if (mapMessage && mapMessage.cells) {
       map.updateMap(mapMessage.cells);
       map.printMap();
     }
@@ -96,7 +95,5 @@ rl.on("line", (line: string) => {
 
   rl.prompt();
 });
-
-ws.on("close", () => process.exit());
 
 ws.on("close", () => process.exit());
