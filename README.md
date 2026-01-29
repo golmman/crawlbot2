@@ -13,6 +13,19 @@
 {"msg": "input","text": "f"}
 ```
 
+### Quick Start Seeded
+
+```json
+{"msg":"register","username":"dirkle","password":"aaa","email":""}
+{"msg":"play","game_id":"seeded-web-trunk"}
+{"msg": "input","text": "-"}
+{"msg": "input","text": "122333"}
+{"msg":"key","keycode":13}
+{"msg": "input","text": "f"}
+{"msg": "input","text": "f"}
+{"msg": "input","text": "f"}
+```
+
 ### Abandon
 
 ```json
@@ -59,4 +72,14 @@ Explore
 Move
 ```json
 {"msg": "input","text": "l"}
+```
+
+Tab
+```json
+{"msg":"key","keycode":9}
+```
+
+Enter
+```json
+{"msg":"key","keycode":13}
 ```
