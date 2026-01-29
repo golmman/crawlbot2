@@ -113,10 +113,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             last_offset = stream.byte_offset();
                             let _ = stdout_clone.write_all(format!("\n{} [Server Raw]: {}\n", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"), value).as_bytes()).await;
 
-                            // The TS client expects an array of messages
-                            if let Some(messages) = value.as_array() {
-                                for msg_val in messages {
-                                    if let Ok(msg) = serde_json::from_value::<GameMessage>(msg_val.clone()) {
+                            // Normalize everything into a Vec of Value
+                            // If it's an object with a "msgs" field, use that field's contents.
+                            let messages_to_process = if let Some(arr) = value.as_array() {
+                                arr.clone()
+                            } else if let Some(msgs_arr) = value.get("msgs").and_then(|m| m.as_array()) {
+                                msgs_arr.clone()
+                            } else {
+                                vec![value.clone()]
+                            };
+
+                            for msg_val in messages_to_process {
+                                match serde_json::from_value::<GameMessage>(msg_val.clone()) {
+                                    Ok(msg) => {
                                         if msg.msg == "map" {
                                             if let Some(cells) = &msg.cells {
                                                 let map_buffer = {
@@ -145,25 +154,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             });
                                         }
                                     }
-                                }
-                            } else {
-                                // Maybe it's a single message?
-                                if let Ok(msg) = serde_json::from_value::<GameMessage>(value.clone()) {
-                                    if msg.msg == "map" {
-                                        if let Some(cells) = &msg.cells {
-                                            let map_buffer = {
-                                                let mut map = map_state_clone.lock().unwrap();
-                                                map.update_map(cells);
-                                                let mut buf = Vec::new();
-                                                if map.print_map(&mut buf).is_ok() {
-                                                    Some(buf)
-                                                } else {
-                                                    None
-                                                }
-                                            };
-                                            if let Some(buf) = map_buffer {
-                                                let _ = stdout_clone.write_all(&buf).await;
+                                    Err(e) => {
+                                        // Some messages might not be GameMessages, skip them silently in production 
+                                        // but keep a log if it's really unexpected.
+                                        // For now, let's just log pings to be sure.
+                                        if let Some(m) = msg_val.get("msg").and_then(|m| m.as_str()) {
+                                            if m != "map" && m != "ping" {
+                                                // ignore other message types for now
                                             }
+                                        } else {
+                                            let _ = stdout_clone.write_all(format!("Failed to parse GameMessage from {:?}: {:?}\n", msg_val, e).as_bytes()).await;
                                         }
                                     }
                                 }
