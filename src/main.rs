@@ -1,13 +1,14 @@
 mod commands;
 mod map;
+mod protocol;
 
 use commands::{create_message, MessageHook};
-use map::{Cell, MapState};
+use map::MapState;
+use protocol::{normalize_messages, GameMessage};
 
 use flate2::{Decompress, FlushDecompress};
 use futures_util::{SinkExt, StreamExt};
-use rustyline_async::{Readline, ReadlineEvent};
-use serde::{Deserialize, Serialize};
+use rustyline_async::{Readline, ReadlineEvent, SharedWriter};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,14 +16,10 @@ use futures_util::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::WebSocketStream;
 
-#[derive(Debug, Deserialize, Serialize)]
-struct GameMessage {
-    msg: String,
-    cells: Option<Vec<Cell>>,
-    #[serde(flatten)]
-    other: serde_json::Map<String, Value>,
-}
+type WsSender = futures_util::stream::SplitSink<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Message>;
+type WsReceiver = futures_util::stream::SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,22 +27,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ws_stream, _) = connect_async(url_str).await?;
     println!("Connected. Forcing Manual Decompression...");
 
-    let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+    let (ws_sender, ws_receiver) = ws_stream.split();
     let map_state = Arc::new(Mutex::new(MapState::new()));
     let message_hook = Arc::new(Mutex::new(MessageHook::new()));
 
-    let (mut rl, mut stdout) = Readline::new(format!(
+    let (rl, stdout) = Readline::new(format!(
         "{} DCSS    > ",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
     ))?;
 
-    let map_state_clone = Arc::clone(&map_state);
-    let mut decompressor = Decompress::new(false); // raw deflate
-
     // Channel for sending messages to the WebSocket
-    let (tx, mut rx) = mpsc::channel::<Message>(32);
+    let (tx, rx) = mpsc::channel::<Message>(32);
 
-    // WebSocket sender task
+    spawn_sender(ws_sender, rx);
+    spawn_receiver(ws_receiver, Arc::clone(&map_state), tx.clone(), stdout.clone());
+    
+    run_repl(rl, stdout, tx, message_hook).await?;
+
+    Ok(())
+}
+
+fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>) {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if let Err(e) = ws_sender.send(msg).await {
@@ -54,139 +56,169 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+}
 
-    let tx_clone = tx.clone();
-    let mut stdout_clone = stdout.clone();
-    // WebSocket receiver task
+fn spawn_receiver(
+    mut ws_receiver: WsReceiver,
+    map_state: Arc<Mutex<MapState>>,
+    tx: mpsc::Sender<Message>,
+    mut stdout: SharedWriter,
+) {
     tokio::spawn(async move {
         let mut buffer = Vec::new();
         let sync_buffer = [0x00, 0x00, 0xff, 0xff];
+        let mut decompressor = Decompress::new(false); // raw deflate
 
         while let Some(msg) = ws_receiver.next().await {
             match msg {
                 Ok(Message::Binary(data)) => {
-                    let mut input = data.to_vec();
-                    input.extend_from_slice(&sync_buffer);
-                    let mut offset = 0;
-
-                    loop {
-                        let prev_in = decompressor.total_in();
-                        let prev_out = decompressor.total_out();
-
-                        let mut temp_buffer = vec![0u8; 32768];
-                        let res = decompressor.decompress(
-                            &input[offset..],
-                            &mut temp_buffer,
-                            FlushDecompress::Sync,
-                        );
-
-                        let consumed = (decompressor.total_in() - prev_in) as usize;
-                        let produced = (decompressor.total_out() - prev_out) as usize;
-
-                        offset += consumed;
-                        buffer.extend_from_slice(&temp_buffer[..produced]);
-
-                        match res {
-                            Ok(flate2::Status::Ok) | Ok(flate2::Status::BufError) => {
-                                if consumed == 0 && produced == 0 {
-                                    break;
-                                }
-                            }
-                            Ok(flate2::Status::StreamEnd) => break,
-                            Err(e) => {
-                                let _ = stdout_clone.write_all(format!("Decompression error: {:?}\n", e).as_bytes()).await;
-                                break;
-                            }
-                        }
-
-                        if offset >= input.len() {
-                            break;
-                        }
-                    }
-
-                    if let Ok(json_data) = String::from_utf8(buffer.clone()) {
-                        // Use StreamDeserializer to handle one or more JSON values in the buffer
-                        let mut stream = serde_json::Deserializer::from_str(&json_data).into_iter::<Value>();
-                        let mut last_offset = 0;
-
-                        while let Some(Ok(value)) = stream.next() {
-                            last_offset = stream.byte_offset();
-                            let _ = stdout_clone.write_all(format!("\n{} [Server Raw]: {}\n", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"), value).as_bytes()).await;
-
-                            // Normalize everything into a Vec of Value
-                            // If it's an object with a "msgs" field, use that field's contents.
-                            let messages_to_process = if let Some(arr) = value.as_array() {
-                                arr.clone()
-                            } else if let Some(msgs_arr) = value.get("msgs").and_then(|m| m.as_array()) {
-                                msgs_arr.clone()
-                            } else {
-                                vec![value.clone()]
-                            };
-
-                            for msg_val in messages_to_process {
-                                match serde_json::from_value::<GameMessage>(msg_val.clone()) {
-                                    Ok(msg) => {
-                                        if msg.msg == "map" {
-                                            if let Some(cells) = &msg.cells {
-                                                let map_buffer = {
-                                                    let mut map = map_state_clone.lock().unwrap();
-                                                    map.update_map(cells);
-                                                    let mut buf = Vec::new();
-                                                    if map.print_map(&mut buf).is_ok() {
-                                                        Some(buf)
-                                                    } else {
-                                                        None
-                                                    }
-                                                };
-                                                if let Some(buf) = map_buffer {
-                                                    let _ = stdout_clone.write_all(&buf).await;
-                                                }
-                                            }
-                                        }
-
-                                        if msg.msg == "ping" {
-                                            let tx_inner = tx_clone.clone();
-                                            let mut stdout_inner = stdout_clone.clone();
-                                            tokio::spawn(async move {
-                                                sleep(Duration::from_secs(5)).await;
-                                                let _ = tx_inner.send(Message::Text(r#"{"msg":"pong"}"#.into())).await;
-                                                let _ = stdout_inner.write_all(format!("\n{} [Client]: pong message sent\n", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")).as_bytes()).await;
-                                            });
-                                        }
-                                    }
-                                    Err(e) => {
-                                        // Some messages might not be GameMessages, skip them silently in production 
-                                        // but keep a log if it's really unexpected.
-                                        // For now, let's just log pings to be sure.
-                                        if let Some(m) = msg_val.get("msg").and_then(|m| m.as_str()) {
-                                            if m != "map" && m != "ping" {
-                                                // ignore other message types for now
-                                            }
-                                        } else {
-                                            let _ = stdout_clone.write_all(format!("Failed to parse GameMessage from {:?}: {:?}\n", msg_val, e).as_bytes()).await;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Remove only the part of the buffer that was successfully parsed
-                        if last_offset > 0 {
-                            buffer.drain(..last_offset);
-                        }
+                    let res = handle_binary_message(
+                        data.to_vec(),
+                        &sync_buffer,
+                        &mut decompressor,
+                        &mut buffer,
+                        &map_state,
+                        &tx,
+                        &mut stdout,
+                    ).await;
+                    
+                    if let Err(e) = res {
+                        let err_msg = format!("Error handling message: {:?}\n", e);
+                        let _ = stdout.write_all(err_msg.as_bytes()).await;
                     }
                 }
                 Ok(Message::Close(_)) => break,
                 Err(e) => {
-                    let _ = stdout_clone.write_all(format!("WebSocket error: {:?}\n", e).as_bytes()).await;
+                    let _ = stdout.write_all(format!("WebSocket error: {:?}\n", e).as_bytes()).await;
                     break;
                 }
                 _ => {}
             }
         }
     });
+}
 
-    // REPL loop
+async fn handle_binary_message(
+    data: Vec<u8>,
+    sync_buffer: &[u8],
+    decompressor: &mut Decompress,
+    buffer: &mut Vec<u8>,
+    map_state: &Arc<Mutex<MapState>>,
+    tx: &mpsc::Sender<Message>,
+    stdout: &mut SharedWriter,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut input = data;
+    input.extend_from_slice(sync_buffer);
+    let mut offset = 0;
+
+    loop {
+        let prev_in = decompressor.total_in();
+        let prev_out = decompressor.total_out();
+
+        let mut temp_buffer = vec![0u8; 32768];
+        let res = decompressor.decompress(
+            &input[offset..],
+            &mut temp_buffer,
+            FlushDecompress::Sync,
+        );
+
+        let consumed = (decompressor.total_in() - prev_in) as usize;
+        let produced = (decompressor.total_out() - prev_out) as usize;
+
+        offset += consumed;
+        buffer.extend_from_slice(&temp_buffer[..produced]);
+
+        match res {
+            Ok(flate2::Status::Ok) | Ok(flate2::Status::BufError) => {
+                if consumed == 0 && produced == 0 {
+                    break;
+                }
+            }
+            Ok(flate2::Status::StreamEnd) => break,
+            Err(e) => return Err(e.into()),
+        }
+
+        if offset >= input.len() {
+            break;
+        }
+    }
+
+    if let Ok(json_data) = String::from_utf8(buffer.clone()) {
+        let mut stream = serde_json::Deserializer::from_str(&json_data).into_iter::<Value>();
+        let mut last_offset = 0;
+
+        while let Some(Ok(value)) = stream.next() {
+            last_offset = stream.byte_offset();
+            let _ = stdout.write_all(format!("\n{} [Server Raw]: {}\n", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"), value).as_bytes()).await;
+
+            for msg_val in normalize_messages(value) {
+                process_game_message(msg_val, map_state, tx, stdout).await?;
+            }
+        }
+
+        if last_offset > 0 {
+            buffer.drain(..last_offset);
+        }
+    }
+
+    Ok(())
+}
+
+async fn process_game_message(
+    msg_val: Value,
+    map_state: &Arc<Mutex<MapState>>,
+    tx: &mpsc::Sender<Message>,
+    stdout: &mut SharedWriter,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match serde_json::from_value::<GameMessage>(msg_val.clone()) {
+        Ok(msg) => {
+            if msg.msg == "map" {
+                if let Some(cells) = &msg.cells {
+                    let map_buffer = {
+                        let mut map = map_state.lock().unwrap();
+                        map.update_map(cells);
+                        let mut buf = Vec::new();
+                        if map.print_map(&mut buf).is_ok() {
+                            Some(buf)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(buf) = map_buffer {
+                        let _ = stdout.write_all(&buf).await;
+                    }
+                }
+            }
+
+            if msg.msg == "ping" {
+                let tx_inner = tx.clone();
+                let mut stdout_inner = stdout.clone();
+                tokio::spawn(async move {
+                    sleep(Duration::from_secs(5)).await;
+                    let _ = tx_inner.send(Message::Text(r#"{"msg":"pong"}"#.into())).await;
+                    let _ = stdout_inner.write_all(format!("\n{} [Client]: pong message sent\n", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")).as_bytes()).await;
+                });
+            }
+        }
+        Err(e) => {
+            if let Some(m) = msg_val.get("msg").and_then(|m| m.as_str()) {
+                if m != "map" && m != "ping" {
+                    // ignore
+                }
+            } else {
+                let _ = stdout.write_all(format!("Failed to parse GameMessage from {:?}: {:?}\n", msg_val, e).as_bytes()).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn run_repl(
+    mut rl: Readline,
+    mut stdout: SharedWriter,
+    tx: mpsc::Sender<Message>,
+    message_hook: Arc<Mutex<MessageHook>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         match rl.readline().await {
             Ok(ReadlineEvent::Line(line)) => {
@@ -213,6 +245,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-
     Ok(())
 }
