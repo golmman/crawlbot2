@@ -1,19 +1,21 @@
 mod commands;
+mod logger;
 mod map;
 mod protocol;
 
 use commands::{MessageHook, create_message};
+use logger::Logger;
 use map::MapState;
 use protocol::{GameMessage, normalize_messages};
 
 use flate2::{Decompress, FlushDecompress};
-use futures_util::AsyncWriteExt;
-use futures_util::{SinkExt, StreamExt};
-use rustyline_async::{Readline, ReadlineEvent, SharedWriter};
+use futures_util::SinkExt;
+use futures_util::StreamExt;
+use rustyline_async::{Readline, ReadlineEvent};
 use serde_json::Value;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
@@ -30,7 +32,6 @@ type WsReceiver = futures_util::stream::SplitStream<
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url_str = "ws://127.0.0.1:8080/socket";
     let (ws_stream, _) = connect_async(url_str).await?;
-    println!("Connected. Forcing Manual Decompression...");
 
     let (ws_sender, ws_receiver) = ws_stream.split();
     let map_state = Arc::new(Mutex::new(MapState::new()));
@@ -41,6 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
     ))?;
 
+    let logger = Logger::new(stdout).await?;
+    logger
+        .log("Connected. Forcing Manual Decompression...\n")
+        .await;
+
     // Channel for sending messages to the WebSocket
     let (tx, rx) = mpsc::channel::<Message>(32);
 
@@ -49,10 +55,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ws_receiver,
         Arc::clone(&map_state),
         tx.clone(),
-        stdout.clone(),
+        logger.clone(),
     );
 
-    run_repl(rl, stdout, tx, message_hook).await?;
+    run_repl(rl, logger, tx, message_hook).await?;
 
     Ok(())
 }
@@ -72,7 +78,7 @@ fn spawn_receiver(
     mut ws_receiver: WsReceiver,
     map_state: Arc<Mutex<MapState>>,
     tx: mpsc::Sender<Message>,
-    mut stdout: SharedWriter,
+    logger: Logger,
 ) {
     tokio::spawn(async move {
         let mut buffer = Vec::new();
@@ -89,20 +95,18 @@ fn spawn_receiver(
                         &mut buffer,
                         &map_state,
                         &tx,
-                        &mut stdout,
+                        &logger,
                     )
                     .await;
 
                     if let Err(e) = res {
                         let err_msg = format!("Error handling message: {:?}\n", e);
-                        let _ = stdout.write_all(err_msg.as_bytes()).await;
+                        logger.log(&err_msg).await;
                     }
                 }
                 Ok(Message::Close(_)) => break,
                 Err(e) => {
-                    let _ = stdout
-                        .write_all(format!("WebSocket error: {:?}\n", e).as_bytes())
-                        .await;
+                    logger.log(&format!("WebSocket error: {:?}\n", e)).await;
                     break;
                 }
                 _ => {}
@@ -118,7 +122,7 @@ async fn handle_binary_message(
     buffer: &mut Vec<u8>,
     map_state: &Arc<Mutex<MapState>>,
     tx: &mpsc::Sender<Message>,
-    stdout: &mut SharedWriter,
+    logger: &Logger,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut input = data;
     input.extend_from_slice(sync_buffer);
@@ -159,19 +163,16 @@ async fn handle_binary_message(
 
         while let Some(Ok(value)) = stream.next() {
             last_offset = stream.byte_offset();
-            let _ = stdout
-                .write_all(
-                    format!(
-                        "\n{} [Server Raw]: {}\n",
-                        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
-                        value
-                    )
-                    .as_bytes(),
-                )
+            logger
+                .log(&format!(
+                    "\n{} [Server Raw]: {}\n",
+                    chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                    value
+                ))
                 .await;
 
             for msg_val in normalize_messages(value) {
-                process_game_message(msg_val, map_state, tx, stdout).await?;
+                process_game_message(msg_val, map_state, tx, logger).await?;
             }
         }
 
@@ -187,15 +188,15 @@ async fn process_game_message(
     msg_val: Value,
     map_state: &Arc<Mutex<MapState>>,
     tx: &mpsc::Sender<Message>,
-    stdout: &mut SharedWriter,
+    logger: &Logger,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match serde_json::from_value::<GameMessage>(msg_val.clone()) {
         Ok(msg) => {
             if msg.msg == "map" {
                 if let Some(cells) = &msg.cells {
                     let map_buffer = {
-                        let mut map = map_state.lock().unwrap();
-                        map.update_map(cells);
+                        let mut map = map_state.lock().await;
+                        map.update_map(cells, logger).await;
                         let mut buf = Vec::new();
                         if map.print_map(&mut buf).is_ok() {
                             Some(buf)
@@ -204,27 +205,26 @@ async fn process_game_message(
                         }
                     };
                     if let Some(buf) = map_buffer {
-                        let _ = stdout.write_all(&buf).await;
+                        if let Ok(s) = String::from_utf8(buf) {
+                            logger.log(&s).await;
+                        }
                     }
                 }
             }
 
             if msg.msg == "ping" {
                 let tx_inner = tx.clone();
-                let mut stdout_inner = stdout.clone();
+                let logger_inner = logger.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_secs(5)).await;
                     let _ = tx_inner
                         .send(Message::Text(r#"{"msg":"pong"}"#.into()))
                         .await;
-                    let _ = stdout_inner
-                        .write_all(
-                            format!(
-                                "\n{} [Client]: pong message sent\n",
-                                chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
-                            )
-                            .as_bytes(),
-                        )
+                    logger_inner
+                        .log(&format!(
+                            "\n{} [Client]: pong message sent\n",
+                            chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
+                        ))
                         .await;
                 });
             }
@@ -235,11 +235,11 @@ async fn process_game_message(
                     // ignore
                 }
             } else {
-                let _ = stdout
-                    .write_all(
-                        format!("Failed to parse GameMessage from {:?}: {:?}\n", msg_val, e)
-                            .as_bytes(),
-                    )
+                logger
+                    .log(&format!(
+                        "Failed to parse GameMessage from {:?}: {:?}\n",
+                        msg_val, e
+                    ))
                     .await;
             }
         }
@@ -249,7 +249,7 @@ async fn process_game_message(
 
 async fn run_repl(
     mut rl: Readline,
-    mut stdout: SharedWriter,
+    logger: Logger,
     tx: mpsc::Sender<Message>,
     message_hook: Arc<Mutex<MessageHook>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -262,8 +262,8 @@ async fn run_repl(
                 }
 
                 if line.starts_with('/') {
-                    let mut hook = message_hook.lock().unwrap();
-                    let msg = create_message(line, &mut hook);
+                    let mut hook = message_hook.lock().await;
+                    let msg = create_message(line, &mut hook, &logger).await;
                     if !msg.is_empty() {
                         tx.send(Message::Text(msg.into())).await?;
                     }
@@ -274,9 +274,7 @@ async fn run_repl(
             }
             Ok(ReadlineEvent::Eof) | Ok(ReadlineEvent::Interrupted) => break,
             Err(e) => {
-                let _ = stdout
-                    .write_all(format!("Readline error: {:?}\n", e).as_bytes())
-                    .await;
+                logger.log(&format!("Readline error: {:?}\n", e)).await;
                 break;
             }
         }

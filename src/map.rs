@@ -26,8 +26,8 @@ impl MapState {
         }
     }
 
-    pub fn update_map(&mut self, cells: &[Cell]) {
-        println!("updateMap");
+    pub async fn update_map(&mut self, cells: &[Cell], logger: &crate::logger::Logger) {
+        logger.log("updateMap\n").await;
 
         let origin_x = (self.width / 2) as i32;
         let origin_y = (self.height / 2) as i32;

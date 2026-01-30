@@ -1,3 +1,4 @@
+use crate::logger::Logger;
 use serde_json::json;
 
 pub struct MessageHook {
@@ -11,27 +12,27 @@ impl MessageHook {
     }
 }
 
-pub fn create_message(command: &str, hook: &mut MessageHook) -> String {
+pub async fn create_message(command: &str, hook: &mut MessageHook, logger: &Logger) -> String {
     match command {
-        "/hook1" => hook1(hook),
-        "/hook2" => hook2(hook),
+        "/hook1" => hook1(hook, logger).await,
+        "/hook2" => hook2(hook, logger).await,
         "/start" => start(hook),
         cmd => {
-            println!("unknown command: {}", cmd);
+            logger.log(&format!("unknown command: {}\n", cmd)).await;
             String::new()
         }
     }
 }
 
-fn hook1(_hook: &mut MessageHook) -> String {
-    println!("hook1");
+async fn hook1(_hook: &mut MessageHook, logger: &Logger) -> String {
+    logger.log("hook1\n").await;
     // In a real implementation with callbacks, we'd set _hook.callback here.
     // For this port, we'll just mimic the logic.
     String::new()
 }
 
-fn hook2(_hook: &mut MessageHook) -> String {
-    println!("hook2");
+async fn hook2(_hook: &mut MessageHook, logger: &Logger) -> String {
+    logger.log("hook2\n").await;
     String::new()
 }
 
