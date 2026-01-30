@@ -2,24 +2,29 @@ mod commands;
 mod map;
 mod protocol;
 
-use commands::{create_message, MessageHook};
+use commands::{MessageHook, create_message};
 use map::MapState;
-use protocol::{normalize_messages, GameMessage};
+use protocol::{GameMessage, normalize_messages};
 
 use flate2::{Decompress, FlushDecompress};
+use futures_util::AsyncWriteExt;
 use futures_util::{SinkExt, StreamExt};
 use rustyline_async::{Readline, ReadlineEvent, SharedWriter};
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use futures_util::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
-type WsSender = futures_util::stream::SplitSink<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, Message>;
-type WsReceiver = futures_util::stream::SplitStream<WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>;
+type WsSender = futures_util::stream::SplitSink<
+    WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    Message,
+>;
+type WsReceiver = futures_util::stream::SplitStream<
+    WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,8 +45,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (tx, rx) = mpsc::channel::<Message>(32);
 
     spawn_sender(ws_sender, rx);
-    spawn_receiver(ws_receiver, Arc::clone(&map_state), tx.clone(), stdout.clone());
-    
+    spawn_receiver(
+        ws_receiver,
+        Arc::clone(&map_state),
+        tx.clone(),
+        stdout.clone(),
+    );
+
     run_repl(rl, stdout, tx, message_hook).await?;
 
     Ok(())
@@ -80,8 +90,9 @@ fn spawn_receiver(
                         &map_state,
                         &tx,
                         &mut stdout,
-                    ).await;
-                    
+                    )
+                    .await;
+
                     if let Err(e) = res {
                         let err_msg = format!("Error handling message: {:?}\n", e);
                         let _ = stdout.write_all(err_msg.as_bytes()).await;
@@ -89,7 +100,9 @@ fn spawn_receiver(
                 }
                 Ok(Message::Close(_)) => break,
                 Err(e) => {
-                    let _ = stdout.write_all(format!("WebSocket error: {:?}\n", e).as_bytes()).await;
+                    let _ = stdout
+                        .write_all(format!("WebSocket error: {:?}\n", e).as_bytes())
+                        .await;
                     break;
                 }
                 _ => {}
@@ -116,11 +129,8 @@ async fn handle_binary_message(
         let prev_out = decompressor.total_out();
 
         let mut temp_buffer = vec![0u8; 32768];
-        let res = decompressor.decompress(
-            &input[offset..],
-            &mut temp_buffer,
-            FlushDecompress::Sync,
-        );
+        let res =
+            decompressor.decompress(&input[offset..], &mut temp_buffer, FlushDecompress::Sync);
 
         let consumed = (decompressor.total_in() - prev_in) as usize;
         let produced = (decompressor.total_out() - prev_out) as usize;
@@ -149,7 +159,16 @@ async fn handle_binary_message(
 
         while let Some(Ok(value)) = stream.next() {
             last_offset = stream.byte_offset();
-            let _ = stdout.write_all(format!("\n{} [Server Raw]: {}\n", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"), value).as_bytes()).await;
+            let _ = stdout
+                .write_all(
+                    format!(
+                        "\n{} [Server Raw]: {}\n",
+                        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                        value
+                    )
+                    .as_bytes(),
+                )
+                .await;
 
             for msg_val in normalize_messages(value) {
                 process_game_message(msg_val, map_state, tx, stdout).await?;
@@ -195,8 +214,18 @@ async fn process_game_message(
                 let mut stdout_inner = stdout.clone();
                 tokio::spawn(async move {
                     sleep(Duration::from_secs(5)).await;
-                    let _ = tx_inner.send(Message::Text(r#"{"msg":"pong"}"#.into())).await;
-                    let _ = stdout_inner.write_all(format!("\n{} [Client]: pong message sent\n", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")).as_bytes()).await;
+                    let _ = tx_inner
+                        .send(Message::Text(r#"{"msg":"pong"}"#.into()))
+                        .await;
+                    let _ = stdout_inner
+                        .write_all(
+                            format!(
+                                "\n{} [Client]: pong message sent\n",
+                                chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
                 });
             }
         }
@@ -206,7 +235,12 @@ async fn process_game_message(
                     // ignore
                 }
             } else {
-                let _ = stdout.write_all(format!("Failed to parse GameMessage from {:?}: {:?}\n", msg_val, e).as_bytes()).await;
+                let _ = stdout
+                    .write_all(
+                        format!("Failed to parse GameMessage from {:?}: {:?}\n", msg_val, e)
+                            .as_bytes(),
+                    )
+                    .await;
             }
         }
     }
@@ -240,7 +274,9 @@ async fn run_repl(
             }
             Ok(ReadlineEvent::Eof) | Ok(ReadlineEvent::Interrupted) => break,
             Err(e) => {
-                let _ = stdout.write_all(format!("Readline error: {:?}\n", e).as_bytes()).await;
+                let _ = stdout
+                    .write_all(format!("Readline error: {:?}\n", e).as_bytes())
+                    .await;
                 break;
             }
         }

@@ -1,6 +1,6 @@
+use crate::map::Cell;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::map::Cell;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GameMessage {

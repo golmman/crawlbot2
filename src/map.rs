@@ -58,10 +58,18 @@ impl MapState {
             for x in 0..self.width {
                 let i = x + y * self.width;
                 if self.cells[i].is_some() {
-                    if x < min_x { min_x = x; }
-                    if x > max_x { max_x = x; }
-                    if y < min_y { min_y = y; }
-                    if y > max_y { max_y = y; }
+                    if x < min_x {
+                        min_x = x;
+                    }
+                    if x > max_x {
+                        max_x = x;
+                    }
+                    if y < min_y {
+                        min_y = y;
+                    }
+                    if y > max_y {
+                        max_y = y;
+                    }
                 }
             }
         }
@@ -76,8 +84,12 @@ impl MapState {
             for x in min_x..=max_x {
                 let i = x + y * self.width;
                 match &self.cells[i] {
-                    None => { write!(writer, " ")?; }
-                    Some(g) => { write!(writer, "{}", g)?; }
+                    None => {
+                        write!(writer, " ")?;
+                    }
+                    Some(g) => {
+                        write!(writer, "{}", g)?;
+                    }
                 }
             }
             writeln!(writer)?;
