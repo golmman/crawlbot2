@@ -219,7 +219,8 @@ fn spawn_processor(
             match msg {
                 protocol::ProcessMessage::Repl(line) => {
                     let mut hook = message_hook.lock().await;
-                    let (new_routine, outgoing) = commands::handle_repl_command(&line, &mut hook);
+                    let (new_routine, outgoing) =
+                        commands::handle_repl_command(&line, &mut hook, &logger).await;
                     hook.current_routine = new_routine;
                     if let Some(msg_str) = outgoing {
                         let _ = tx_sender.send(Message::Text(msg_str.into())).await;
