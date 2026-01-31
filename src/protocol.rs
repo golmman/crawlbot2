@@ -10,6 +10,12 @@ pub struct GameMessage {
     pub other: serde_json::Map<String, Value>,
 }
 
+#[derive(Debug)]
+pub enum ProcessMessage {
+    Server(Value),
+    Repl(String),
+}
+
 pub fn normalize_messages(value: Value) -> Vec<Value> {
     if let Some(arr) = value.as_array() {
         arr.clone()

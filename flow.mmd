@@ -1,0 +1,49 @@
+---
+title: DCSS Message Processing
+---
+flowchart TB
+
+receiver -.-> processing -.-> sender
+
+subgraph receiver[Receiver Flow]
+    direction TB
+    receiver_server[Receive Server Message]
+    receiver_repl[Receive Repl Message]
+    receiver_push[Push Message to **Receiver-Queue** Back]
+
+    receiver_server --> receiver_push
+    receiver_repl --> receiver_push
+end
+
+subgraph sender[Sender Flow]
+    direction TB
+    sender_wait[Wait 1 Second]
+    sender_pop[Pop Message from **Sender-Queue** Front]
+    sender_send[Send Message to Server]
+
+    sender_wait --> sender_pop
+    sender_pop --> sender_send
+    sender_send --> sender_wait
+end
+
+subgraph processing[Processing Flow]
+    direction TB
+    processing_pop[Pop Message<br> from<br> **Receiver-Queue**<br> Front]
+    processing_decide_type{message<br>type?}
+    processing_set_routine[Set current<br> Routine]
+    processing_decide_ping{is Ping-<br>Message?}
+    processing_push[Push Ping-Message<br> to **Sender-Queue** Back]
+    processing_prepare_execution[Peek **Receiver-Queue** Front]
+    processing_execute[Pass popped and peeked Message<br> to current Routine Executor]
+    processing_update_routine[Update current Routine, Push Message to **Sender-Queue** Back]
+
+    processing_pop --> processing_decide_type
+    processing_decide_type -->|Repl| processing_set_routine
+    processing_decide_type -->|Server| processing_decide_ping
+
+    processing_decide_ping -->|Yes| processing_push
+    processing_decide_ping -->|No| processing_prepare_execution
+    processing_prepare_execution --> processing_execute
+
+    processing_execute --> processing_update_routine
+end
