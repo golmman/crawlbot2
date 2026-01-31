@@ -3,20 +3,20 @@ mod logger;
 mod map;
 mod protocol;
 
-use commands::{MessageHook, create_message};
-use logger::Logger;
-use map::MapState;
-use protocol::{GameMessage, normalize_messages};
-
+use crate::protocol::normalize_messages;
+use commands::MessageHook;
 use flate2::{Decompress, FlushDecompress};
 use futures_util::SinkExt;
 use futures_util::StreamExt;
+use logger::Logger;
+use map::MapState;
 use rustyline_async::{Readline, ReadlineEvent};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
+use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
@@ -48,17 +48,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await;
 
     // Channel for sending messages to the WebSocket
-    let (tx, rx) = mpsc::channel::<Message>(32);
+    let (tx_sender, rx_sender) = mpsc::channel::<Message>(32);
+    // Channel for incoming messages (Server + Repl)
+    let (tx_receiver, rx_receiver) = mpsc::channel::<protocol::ProcessMessage>(32);
 
-    spawn_sender(ws_sender, rx);
-    spawn_receiver(
-        ws_receiver,
+    spawn_sender(ws_sender, rx_sender);
+    spawn_receiver(ws_receiver, tx_receiver.clone(), logger.clone());
+
+    spawn_processor(
+        rx_receiver,
+        tx_sender,
         Arc::clone(&map_state),
-        tx.clone(),
+        Arc::clone(&message_hook),
         logger.clone(),
     );
 
-    run_repl(rl, logger, tx, message_hook).await?;
+    run_repl(rl, logger, tx_receiver, message_hook).await?;
 
     Ok(())
 }
@@ -66,6 +71,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>) {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
+            sleep(Duration::from_secs(1)).await;
             if let Err(e) = ws_sender.send(msg).await {
                 eprintln!("WebSocket send error: {:?}", e);
                 break;
@@ -76,8 +82,7 @@ fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>) {
 
 fn spawn_receiver(
     mut ws_receiver: WsReceiver,
-    map_state: Arc<Mutex<MapState>>,
-    tx: mpsc::Sender<Message>,
+    tx_receiver: mpsc::Sender<protocol::ProcessMessage>,
     logger: Logger,
 ) {
     tokio::spawn(async move {
@@ -93,8 +98,7 @@ fn spawn_receiver(
                         &sync_buffer,
                         &mut decompressor,
                         &mut buffer,
-                        &map_state,
-                        &tx,
+                        &tx_receiver,
                         &logger,
                     )
                     .await;
@@ -120,8 +124,7 @@ async fn handle_binary_message(
     sync_buffer: &[u8],
     decompressor: &mut Decompress,
     buffer: &mut Vec<u8>,
-    map_state: &Arc<Mutex<MapState>>,
-    tx: &mpsc::Sender<Message>,
+    tx_receiver: &mpsc::Sender<protocol::ProcessMessage>,
     logger: &Logger,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut input = data;
@@ -172,7 +175,9 @@ async fn handle_binary_message(
                 .await;
 
             for msg_val in normalize_messages(value) {
-                process_game_message(msg_val, map_state, tx, logger).await?;
+                tx_receiver
+                    .send(protocol::ProcessMessage::Server(msg_val))
+                    .await?;
             }
         }
 
@@ -184,74 +189,86 @@ async fn handle_binary_message(
     Ok(())
 }
 
-async fn process_game_message(
-    msg_val: Value,
-    map_state: &Arc<Mutex<MapState>>,
-    tx: &mpsc::Sender<Message>,
-    logger: &Logger,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match serde_json::from_value::<GameMessage>(msg_val.clone()) {
-        Ok(msg) => {
-            if msg.msg == "map" {
-                if let Some(cells) = &msg.cells {
-                    let map_buffer = {
-                        let mut map = map_state.lock().await;
-                        map.update_map(cells, logger).await;
-                        let mut buf = Vec::new();
-                        if map.print_map(&mut buf).is_ok() {
-                            Some(buf)
-                        } else {
-                            None
-                        }
+fn spawn_processor(
+    rx_receiver: mpsc::Receiver<protocol::ProcessMessage>,
+    tx_sender: mpsc::Sender<Message>,
+    map_state: Arc<Mutex<MapState>>,
+    message_hook: Arc<Mutex<MessageHook>>,
+    logger: Logger,
+) {
+    tokio::spawn(async move {
+        let mut rx_stream = ReceiverStream::new(rx_receiver);
+        let mut peeked: Option<protocol::ProcessMessage> = None;
+
+        loop {
+            let msg = if let Some(m) = peeked.take() {
+                Some(m)
+            } else {
+                rx_stream.next().await
+            };
+
+            let Some(msg) = msg else { break };
+
+            match msg {
+                protocol::ProcessMessage::Repl(line) => {
+                    let mut hook = message_hook.lock().await;
+                    let (new_routine, outgoing) = commands::handle_repl_command(&line, &mut hook);
+                    hook.current_routine = new_routine;
+                    if let Some(msg_str) = outgoing {
+                        let _ = tx_sender.send(Message::Text(msg_str.into())).await;
+                    }
+                }
+                protocol::ProcessMessage::Server(val) => {
+                    // Check for ping
+                    if val.get("msg").and_then(|m| m.as_str()) == Some("ping") {
+                        let tx_inner = tx_sender.clone();
+                        let logger_inner = logger.clone();
+                        tokio::spawn(async move {
+                            sleep(Duration::from_secs(5)).await;
+                            let _ = tx_inner
+                                .send(Message::Text(r#"{"msg":"pong"}"#.into()))
+                                .await;
+                            logger_inner
+                                .log(&format!(
+                                    "\n{} [Client]: pong message sent\n",
+                                    chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
+                                ))
+                                .await;
+                        });
+                        continue;
+                    }
+
+                    // Process with current routine
+                    // Manual peek:
+                    peeked = rx_stream.next().await;
+                    let next_val = match &peeked {
+                        Some(protocol::ProcessMessage::Server(v)) => Some(v),
+                        _ => None,
                     };
-                    if let Some(buf) = map_buffer {
-                        if let Ok(s) = String::from_utf8(buf) {
-                            logger.log(&s).await;
-                        }
+
+                    let mut hook = message_hook.lock().await;
+                    if let Some(outgoing) = commands::execute_routine(
+                        &mut hook.current_routine,
+                        &val,
+                        next_val,
+                        &map_state,
+                        &logger,
+                    )
+                    .await
+                    {
+                        let _ = tx_sender.send(Message::Text(outgoing.into())).await;
                     }
                 }
             }
-
-            if msg.msg == "ping" {
-                let tx_inner = tx.clone();
-                let logger_inner = logger.clone();
-                tokio::spawn(async move {
-                    sleep(Duration::from_secs(5)).await;
-                    let _ = tx_inner
-                        .send(Message::Text(r#"{"msg":"pong"}"#.into()))
-                        .await;
-                    logger_inner
-                        .log(&format!(
-                            "\n{} [Client]: pong message sent\n",
-                            chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
-                        ))
-                        .await;
-                });
-            }
         }
-        Err(e) => {
-            if let Some(m) = msg_val.get("msg").and_then(|m| m.as_str()) {
-                if m != "map" && m != "ping" {
-                    // ignore
-                }
-            } else {
-                logger
-                    .log(&format!(
-                        "Failed to parse GameMessage from {:?}: {:?}\n",
-                        msg_val, e
-                    ))
-                    .await;
-            }
-        }
-    }
-    Ok(())
+    });
 }
 
 async fn run_repl(
     mut rl: Readline,
     logger: Logger,
-    tx: mpsc::Sender<Message>,
-    message_hook: Arc<Mutex<MessageHook>>,
+    tx_receiver: mpsc::Sender<protocol::ProcessMessage>,
+    _message_hook: Arc<Mutex<MessageHook>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         match rl.readline().await {
@@ -262,13 +279,13 @@ async fn run_repl(
                 }
 
                 if line.starts_with('/') {
-                    let mut hook = message_hook.lock().await;
-                    let msg = create_message(line, &mut hook, &logger).await;
-                    if !msg.is_empty() {
-                        tx.send(Message::Text(msg.into())).await?;
-                    }
+                    tx_receiver
+                        .send(protocol::ProcessMessage::Repl(line.to_string()))
+                        .await?;
                 } else {
-                    tx.send(Message::Text(line.into())).await?;
+                    tx_receiver
+                        .send(protocol::ProcessMessage::Repl(line.to_string()))
+                        .await?;
                 }
                 rl.add_history_entry(line.to_string());
             }
