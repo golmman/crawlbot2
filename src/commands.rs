@@ -1,7 +1,7 @@
 use crate::logger::Logger;
 use crate::map::MapState;
 use crate::protocol::GameMessage;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -10,6 +10,7 @@ pub enum Routine {
     Idle,
     Hook1,
     Hook2,
+    StartSeededGame,
 }
 
 pub struct MessageHook {
@@ -60,6 +61,13 @@ pub async fn execute_routine(
             *routine = Routine::Idle;
             None
         }
+        Routine::StartSeededGame => {
+            logger
+                .log("Executing StartSeededGame routine logic\n")
+                .await;
+            *routine = Routine::Idle;
+            None
+        }
     }
 }
 
@@ -67,18 +75,7 @@ pub fn handle_repl_command(command: &str, _hook: &mut MessageHook) -> (Routine, 
     match command {
         "/hook1" => (Routine::Hook1, None),
         "/hook2" => (Routine::Hook2, None),
-        "/start" => (
-            Routine::Idle,
-            Some(
-                json!({
-                    "msg": "register",
-                    "username": "dirkle",
-                    "password": "aaa",
-                    "email": ""
-                })
-                .to_string(),
-            ),
-        ),
+        "/start" => (Routine::StartSeededGame, None),
         _ => (Routine::Idle, Some(command.to_string())),
     }
 }

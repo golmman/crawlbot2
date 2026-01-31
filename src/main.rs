@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Channel for incoming messages (Server + Repl)
     let (tx_receiver, rx_receiver) = mpsc::channel::<protocol::ProcessMessage>(32);
 
-    spawn_sender(ws_sender, rx_sender);
+    spawn_sender(ws_sender, rx_sender, logger.clone());
     spawn_receiver(ws_receiver, tx_receiver.clone(), logger.clone());
 
     spawn_processor(
@@ -68,10 +68,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>) {
+fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>, logger: Logger) {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            sleep(Duration::from_secs(1)).await;
+            sleep(Duration::from_millis(500)).await;
+            logger
+                .log(&format!(
+                    "\n{} [Client]: {}\n",
+                    chrono::Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                    msg
+                ))
+                .await;
             if let Err(e) = ws_sender.send(msg).await {
                 eprintln!("WebSocket send error: {:?}", e);
                 break;
@@ -222,17 +229,10 @@ fn spawn_processor(
                     // Check for ping
                     if val.get("msg").and_then(|m| m.as_str()) == Some("ping") {
                         let tx_inner = tx_sender.clone();
-                        let logger_inner = logger.clone();
                         tokio::spawn(async move {
                             sleep(Duration::from_secs(5)).await;
                             let _ = tx_inner
                                 .send(Message::Text(r#"{"msg":"pong"}"#.into()))
-                                .await;
-                            logger_inner
-                                .log(&format!(
-                                    "\n{} [Client]: pong message sent\n",
-                                    chrono::Local::now().format("%Y-%m-%dT%H:%M:%S")
-                                ))
                                 .await;
                         });
                         continue;
