@@ -32,6 +32,7 @@ impl Logger {
         // Write to stdout (SharedWriter)
         let mut stdout = self.stdout.clone();
         let _ = stdout.write_all(message.as_bytes());
+        let _ = stdout.flush();
 
         // Write to file
         let mut file = self.file.lock().await;

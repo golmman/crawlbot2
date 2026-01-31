@@ -84,7 +84,7 @@ pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Op
         "/start" => (Routine::StartSeededGame, None),
         _ => {
             logger
-                .log(&format!("unknown repl command: {}", command))
+                .log(&format!("unknown repl command: {}\n", command))
                 .await;
             (Routine::Idle, Some(command.to_string()))
         }
