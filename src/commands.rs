@@ -13,18 +13,6 @@ pub enum Routine {
     StartSeededGame,
 }
 
-pub struct MessageHook {
-    pub current_routine: Routine,
-}
-
-impl MessageHook {
-    pub fn new() -> Self {
-        Self {
-            current_routine: Routine::Idle,
-        }
-    }
-}
-
 pub async fn execute_routine(
     routine: &mut Routine,
     current: &Value,
@@ -89,11 +77,7 @@ pub async fn execute_routine(
     }
 }
 
-pub async fn handle_repl_command(
-    command: &str,
-    _hook: &mut MessageHook,
-    logger: &Logger,
-) -> (Routine, Option<String>) {
+pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Option<String>) {
     match command {
         "/hook1" => (Routine::Hook1, None),
         "/hook2" => (Routine::Hook2, None),

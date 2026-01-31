@@ -4,7 +4,7 @@ mod map;
 mod protocol;
 
 use crate::protocol::normalize_messages;
-use commands::MessageHook;
+use commands::Routine;
 use flate2::{Decompress, FlushDecompress};
 use futures_util::SinkExt;
 use futures_util::StreamExt;
@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (ws_sender, ws_receiver) = ws_stream.split();
     let map_state = Arc::new(Mutex::new(MapState::new()));
-    let message_hook = Arc::new(Mutex::new(MessageHook::new()));
+    let current_routine = Arc::new(Mutex::new(Routine::Idle));
 
     let (rl, stdout) = Readline::new(format!(
         "{} DCSS    > ",
@@ -59,11 +59,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rx_receiver,
         tx_sender,
         Arc::clone(&map_state),
-        Arc::clone(&message_hook),
+        Arc::clone(&current_routine),
         logger.clone(),
     );
 
-    run_repl(rl, logger, tx_receiver, message_hook).await?;
+    run_repl(rl, logger, tx_receiver, current_routine).await?;
 
     Ok(())
 }
@@ -200,7 +200,7 @@ fn spawn_processor(
     rx_receiver: mpsc::Receiver<protocol::ProcessMessage>,
     tx_sender: mpsc::Sender<Message>,
     map_state: Arc<Mutex<MapState>>,
-    message_hook: Arc<Mutex<MessageHook>>,
+    current_routine: Arc<Mutex<Routine>>,
     logger: Logger,
 ) {
     tokio::spawn(async move {
@@ -218,10 +218,10 @@ fn spawn_processor(
 
             match msg {
                 protocol::ProcessMessage::Repl(line) => {
-                    let mut hook = message_hook.lock().await;
+                    let mut routine = current_routine.lock().await;
                     let (new_routine, outgoing) =
-                        commands::handle_repl_command(&line, &mut hook, &logger).await;
-                    hook.current_routine = new_routine;
+                        commands::handle_repl_command(&line, &logger).await;
+                    *routine = new_routine;
                     if let Some(msg_str) = outgoing {
                         let _ = tx_sender.send(Message::Text(msg_str.into())).await;
                     }
@@ -247,9 +247,9 @@ fn spawn_processor(
                         _ => None,
                     };
 
-                    let mut hook = message_hook.lock().await;
+                    let mut routine = current_routine.lock().await;
                     if let Some(outgoing) = commands::execute_routine(
-                        &mut hook.current_routine,
+                        &mut *routine,
                         &val,
                         next_val,
                         &map_state,
@@ -269,7 +269,7 @@ async fn run_repl(
     mut rl: Readline,
     logger: Logger,
     tx_receiver: mpsc::Sender<protocol::ProcessMessage>,
-    _message_hook: Arc<Mutex<MessageHook>>,
+    _current_routine: Arc<Mutex<Routine>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         match rl.readline().await {
