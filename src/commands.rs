@@ -5,9 +5,6 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-const REGISTER: Option<&str> =
-    Some(r#"{"msg":"register","username":"dirkle","password":"aaa","email":""}"#);
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Routine {
     Idle,
@@ -81,8 +78,10 @@ pub async fn execute_routine(
                 .log("[ROUTIN]: Executing StartSeededGame routine logic\n")
                 .await;
 
-            if msg_type == Some("test") {
-                return REGISTER.map(String::from);
+            if msg_type == None {
+                return command::register();
+            } else if msg_type == Some("register_fail") {
+                return command::login();
             }
 
             *routine = Routine::Idle;
@@ -106,5 +105,25 @@ pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Op
                 .await;
             (Routine::Idle, Some(command.to_string()))
         }
+    }
+}
+
+mod command {
+    use serde_json::json;
+
+    pub fn register() -> Option<String> {
+        Some(
+            json!({
+                "msg": "register",
+                "username": "dirkle",
+                "password": "aaa",
+                "email": ""
+            })
+            .to_string(),
+        )
+    }
+
+    pub fn login() -> Option<String> {
+        Some(json!({"msg":"login","username":"dirkle","password":"aaa"}).to_string())
     }
 }
