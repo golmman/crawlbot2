@@ -1,7 +1,7 @@
 use crate::logger::Logger;
 use crate::map::MapState;
 use crate::protocol::GameMessage;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -29,7 +29,10 @@ pub async fn execute_routine(
     };
 
     logger
-        .log(&format!("[ROUTIN]: Executing routine with message '{}'\n", msg.msg))
+        .log(&format!(
+            "[ROUTIN]: Executing routine with message '{}'\n",
+            msg.msg
+        ))
         .await;
 
     if msg.msg == "map" {
@@ -52,12 +55,16 @@ pub async fn execute_routine(
             None
         }
         Routine::Hook1 => {
-            logger.log("[ROUTIN]: Executing Hook1 routine logic\n").await;
+            logger
+                .log("[ROUTIN]: Executing Hook1 routine logic\n")
+                .await;
             *routine = Routine::Idle;
             None
         }
         Routine::Hook2 => {
-            logger.log("[ROUTIN]: Executing Hook2 routine logic\n").await;
+            logger
+                .log("[ROUTIN]: Executing Hook2 routine logic\n")
+                .await;
             *routine = Routine::Idle;
             None
         }

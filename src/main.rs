@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 
@@ -182,21 +181,20 @@ async fn handle_binary_message(
 }
 
 fn spawn_processor(
-    rx_receiver: mpsc::Receiver<protocol::ProcessMessage>,
+    mut rx_receiver: mpsc::Receiver<protocol::ProcessMessage>,
     tx_sender: mpsc::Sender<Message>,
     map_state: Arc<Mutex<MapState>>,
     current_routine: Arc<Mutex<Routine>>,
     logger: Logger,
 ) {
     tokio::spawn(async move {
-        let mut rx_stream = ReceiverStream::new(rx_receiver);
         let mut peeked: Option<protocol::ProcessMessage> = None;
 
         loop {
             let msg = if let Some(m) = peeked.take() {
                 Some(m)
             } else {
-                rx_stream.next().await
+                rx_receiver.recv().await
             };
 
             let Some(msg) = msg else { break };
@@ -233,7 +231,10 @@ fn spawn_processor(
                     // Process with current routine
                     // Manual peek:
                     logger.log(&format!("[PROCES]: peeking...\n")).await;
-                    peeked = rx_stream.next().await;
+                    peeked = match rx_receiver.try_recv() {
+                        Ok(p) => Some(p),
+                        Err(_) => None,
+                    };
                     let next_val = match &peeked {
                         Some(protocol::ProcessMessage::Server(v)) => Some(v),
                         _ => None,
