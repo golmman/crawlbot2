@@ -30,7 +30,7 @@ subgraph processing[Processing Flow]
     direction TB
     processing_pop[Pop Message<br> from<br> **Receiver-Queue**<br> Front]
     processing_decide_type{message<br>type?}
-    processing_set_routine[Set current<br> Routine]
+    processing_set_routine[Set current Routine,<br> Push Message to<br> **Sender-Queue** Back]
     processing_decide_ping{is Ping-<br>Message?}
     processing_push[Push Ping-Message<br> to **Sender-Queue** Back]
     processing_prepare_execution[Peek **Receiver-Queue** Front]

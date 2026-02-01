@@ -29,14 +29,17 @@ impl Logger {
     }
 
     pub async fn log(&self, message: &str) {
+        let now = Local::now();
+        let timestamped_message = format!("{} {}", now.format("%Y-%m-%dT%H:%M:%S"), message);
+
         // Write to stdout (SharedWriter)
         let mut stdout = self.stdout.clone();
-        let _ = stdout.write_all(message.as_bytes());
+        let _ = stdout.write_all(timestamped_message.as_bytes());
         let _ = stdout.flush();
 
         // Write to file
         let mut file = self.file.lock().await;
-        let _ = file.write_all(message.as_bytes());
+        let _ = file.write_all(timestamped_message.as_bytes());
         let _ = file.flush();
     }
 }

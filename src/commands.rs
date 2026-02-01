@@ -5,6 +5,9 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+const REGISTER: Option<&str> =
+    Some(r#"{"msg":"register","username":"dirkle","password":"aaa","email":""}"#);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Routine {
     Idle,
@@ -24,6 +27,10 @@ pub async fn execute_routine(
         Ok(msg) => msg,
         Err(_) => return None,
     };
+
+    logger
+        .log(&format!("Executing routine with message '{}'\n", msg.msg))
+        .await;
 
     if msg.msg == "map" {
         if let Some(cells) = &msg.cells {
@@ -60,15 +67,7 @@ pub async fn execute_routine(
                 .await;
 
             if 1 == 1 {
-                return Some(
-                    json!({
-                        "msg": "register",
-                        "username": "dirkle",
-                        "password": "aaa",
-                        "email": ""
-                    })
-                    .to_string(),
-                );
+                return REGISTER.map(String::from);
             }
 
             *routine = Routine::Idle;
@@ -81,7 +80,7 @@ pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Op
     match command {
         "/hook1" => (Routine::Hook1, None),
         "/hook2" => (Routine::Hook2, None),
-        "/start" => (Routine::StartSeededGame, None),
+        "/start" => (Routine::StartSeededGame, REGISTER.map(String::from)),
         _ => {
             logger
                 .log(&format!("unknown repl command: {}\n", command))
