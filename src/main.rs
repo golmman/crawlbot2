@@ -205,7 +205,15 @@ fn spawn_processor(
                     let (new_routine, outgoing) =
                         commands::handle_repl_command(&line, &logger).await;
                     *routine = new_routine;
-                    if let Some(msg_str) = outgoing {
+
+                    let msg_to_send = if let Some(msg_str) = outgoing {
+                        Some(msg_str)
+                    } else {
+                        commands::execute_routine(&mut *routine, None, None, &map_state, &logger)
+                            .await
+                    };
+
+                    if let Some(msg_str) = msg_to_send {
                         let _ = tx_sender.send(Message::Text(msg_str.into())).await;
                     }
                 }
@@ -247,7 +255,7 @@ fn spawn_processor(
                         .await;
                     if let Some(outgoing) = commands::execute_routine(
                         &mut *routine,
-                        &val,
+                        Some(&val),
                         next_val,
                         &map_state,
                         &logger,

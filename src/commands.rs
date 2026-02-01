@@ -18,31 +18,39 @@ pub enum Routine {
 
 pub async fn execute_routine(
     routine: &mut Routine,
-    current: &Value,
+    current: Option<&Value>,
     _next: Option<&Value>,
     map_state: &Arc<Mutex<MapState>>,
     logger: &Logger,
 ) -> Option<String> {
-    let msg = match serde_json::from_value::<GameMessage>(current.clone()) {
-        Ok(msg) => msg,
-        Err(_) => return None,
+    let msg = if let Some(current_val) = current {
+        match serde_json::from_value::<GameMessage>(current_val.clone()) {
+            Ok(m) => Some(m),
+            Err(_) => return None,
+        }
+    } else {
+        None
     };
+
+    let msg_type = msg.as_ref().map(|m| m.msg.as_str());
 
     logger
         .log(&format!(
-            "[ROUTIN]: Executing routine with message '{}'\n",
-            msg.msg
+            "[ROUTIN]: Executing routine with message '{:?}'\n",
+            msg_type
         ))
         .await;
 
-    if msg.msg == "map" {
-        if let Some(cells) = &msg.cells {
-            let mut map = map_state.lock().await;
-            map.update_map(cells, logger).await;
-            let mut buf = Vec::new();
-            if map.print_map(&mut buf).is_ok() {
-                if let Ok(s) = String::from_utf8(buf) {
-                    logger.log(&s).await;
+    if let Some(ref m) = msg {
+        if m.msg == "map" {
+            if let Some(cells) = &m.cells {
+                let mut map = map_state.lock().await;
+                map.update_map(cells, logger).await;
+                let mut buf = Vec::new();
+                if map.print_map(&mut buf).is_ok() {
+                    if let Ok(s) = String::from_utf8(buf) {
+                        logger.log(&s).await;
+                    }
                 }
             }
         }
@@ -73,7 +81,7 @@ pub async fn execute_routine(
                 .log("[ROUTIN]: Executing StartSeededGame routine logic\n")
                 .await;
 
-            if 1 == 1 {
+            if msg_type == Some("test") {
                 return REGISTER.map(String::from);
             }
 
@@ -91,7 +99,7 @@ pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Op
     match command {
         "/hook1" => (Routine::Hook1, None),
         "/hook2" => (Routine::Hook2, None),
-        "/start" => (Routine::StartSeededGame, REGISTER.map(String::from)),
+        "/start" => (Routine::StartSeededGame, None),
         _ => {
             logger
                 .log(&format!("unknown repl command: {}\n", command))
