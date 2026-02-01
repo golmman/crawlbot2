@@ -69,7 +69,7 @@ fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>, logger
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             sleep(Duration::from_millis(2500)).await;
-            logger.log(&format!("[Client]: {}\n", msg)).await;
+            logger.log(&format!("[CLIENT]: {}\n", msg)).await;
             if let Err(e) = ws_sender.send(msg).await {
                 eprintln!("WebSocket send error: {:?}", e);
                 break;
@@ -164,7 +164,7 @@ async fn handle_binary_message(
 
         while let Some(Ok(value)) = stream.next() {
             last_offset = stream.byte_offset();
-            logger.log(&format!("[Server Raw]: {}\n", value)).await;
+            logger.log(&format!("[SERVER]: {}\n", value)).await;
 
             for msg_val in normalize_messages(value) {
                 tx_receiver
@@ -212,13 +212,17 @@ fn spawn_processor(
                     }
                 }
                 protocol::ProcessMessage::Server(val) => {
-                    logger.log(&format!("")).await;
+                    logger
+                        .log(&format!(
+                            "[PROCES]: processing message '{:?}'\n",
+                            val.get("msg")
+                        ))
+                        .await;
 
                     // Check for ping
                     if val.get("msg").and_then(|m| m.as_str()) == Some("ping") {
                         let tx_inner = tx_sender.clone();
                         tokio::spawn(async move {
-                            sleep(Duration::from_secs(5)).await;
                             let _ = tx_inner
                                 .send(Message::Text(r#"{"msg":"pong"}"#.into()))
                                 .await;
@@ -226,10 +230,9 @@ fn spawn_processor(
                         continue;
                     }
 
-                    // println!("AAAAAAAAAA {:?}", val.get("msg"));
-
                     // Process with current routine
                     // Manual peek:
+                    logger.log(&format!("[PROCES]: peeking...\n")).await;
                     peeked = rx_stream.next().await;
                     let next_val = match &peeked {
                         Some(protocol::ProcessMessage::Server(v)) => Some(v),
@@ -237,6 +240,10 @@ fn spawn_processor(
                     };
 
                     let mut routine = current_routine.lock().await;
+
+                    logger
+                        .log(&format!("[PROCES]: executing routine...\n"))
+                        .await;
                     if let Some(outgoing) = commands::execute_routine(
                         &mut *routine,
                         &val,
@@ -248,8 +255,6 @@ fn spawn_processor(
                     {
                         let _ = tx_sender.send(Message::Text(outgoing.into())).await;
                     }
-
-                    // println!("BBBBBBBBB {:?}", routine);
                 }
             }
         }

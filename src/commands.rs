@@ -29,7 +29,7 @@ pub async fn execute_routine(
     };
 
     logger
-        .log(&format!("Executing routine with message '{}'\n", msg.msg))
+        .log(&format!("[ROUTIN]: Executing routine with message '{}'\n", msg.msg))
         .await;
 
     if msg.msg == "map" {
@@ -47,23 +47,23 @@ pub async fn execute_routine(
 
     match routine {
         Routine::Idle => {
-            logger.log("Executing Idle routine logic\n").await;
+            logger.log("[ROUTIN]: Executing Idle routine logic\n").await;
             *routine = Routine::Idle;
             None
         }
         Routine::Hook1 => {
-            logger.log("Executing Hook1 routine logic\n").await;
+            logger.log("[ROUTIN]: Executing Hook1 routine logic\n").await;
             *routine = Routine::Idle;
             None
         }
         Routine::Hook2 => {
-            logger.log("Executing Hook2 routine logic\n").await;
+            logger.log("[ROUTIN]: Executing Hook2 routine logic\n").await;
             *routine = Routine::Idle;
             None
         }
         Routine::StartSeededGame => {
             logger
-                .log("Executing StartSeededGame routine logic\n")
+                .log("[ROUTIN]: Executing StartSeededGame routine logic\n")
                 .await;
 
             if 1 == 1 {
@@ -77,6 +77,10 @@ pub async fn execute_routine(
 }
 
 pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Option<String>) {
+    logger
+        .log(&format!("[REPL  ]: handling repl command '{}'\n", command))
+        .await;
+
     match command {
         "/hook1" => (Routine::Hook1, None),
         "/hook2" => (Routine::Hook2, None),
