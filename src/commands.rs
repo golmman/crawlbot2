@@ -10,6 +10,7 @@ pub enum Routine {
     Idle,
     Hook1,
     Hook2,
+    StartGame,
     StartSeededGame,
 }
 
@@ -54,31 +55,86 @@ pub async fn execute_routine(
         }
     }
 
+    logger
+        .log(&format!(
+            "[ROUTIN]: Executing {:?} routine logic\n",
+            routine
+        ))
+        .await;
+
     match routine {
         Routine::Idle => {
-            logger.log("[ROUTIN]: Executing Idle routine logic\n").await;
             *routine = Routine::Idle;
             None
         }
         Routine::Hook1 => {
-            logger
-                .log("[ROUTIN]: Executing Hook1 routine logic\n")
-                .await;
             *routine = Routine::Idle;
             None
         }
         Routine::Hook2 => {
-            logger
-                .log("[ROUTIN]: Executing Hook2 routine logic\n")
-                .await;
             *routine = Routine::Idle;
             None
         }
-        Routine::StartSeededGame => {
-            logger
-                .log("[ROUTIN]: Executing StartSeededGame routine logic\n")
-                .await;
+        Routine::StartGame => {
+            let result = match msg_type {
+                None => {
+                    *routine = Routine::StartGame;
+                    command::register_random()
+                }
+                Some("login_success") => {
+                    *routine = Routine::StartGame;
+                    command::play()
+                }
+                Some("ui-push") => match msg_title {
+                    Some(title) if title.contains("species") => {
+                        *routine = Routine::StartGame;
+                        command::press("f")
+                    }
+                    Some(title) if title.contains("background") => {
+                        *routine = Routine::StartGame;
+                        command::press("f")
+                    }
+                    Some(title) if title.contains("Welcome") => {
+                        logger
+                            .log("[ROUTIN]: StartSeededGame successfully finished\n")
+                            .await;
+                        *routine = Routine::Idle;
+                        command::press("f")
+                    }
+                    _ => {
+                        logger
+                            .log("[ROUTIN]: StartSeededGame aborted, title not recognized\n")
+                            .await;
+                        *routine = Routine::Idle;
+                        None
+                    }
+                },
+                Some("html")
+                | Some("set_game_links")
+                | Some("game_client")
+                | Some("game_started")
+                | Some("chat")
+                | Some("version")
+                | Some("options")
+                | Some("layout")
+                | Some("ui-state-sync")
+                | Some("ui-state")
+                | Some("ui_state")
+                | Some("ui-pop")
+                | Some("player")
+                | Some("update_spectators") => {
+                    *routine = Routine::StartGame;
+                    None
+                }
+                _ => {
+                    *routine = Routine::Idle;
+                    None
+                }
+            };
 
+            result
+        }
+        Routine::StartSeededGame => {
             let result = match msg_type {
                 None => {
                     *routine = Routine::StartSeededGame;
@@ -86,12 +142,13 @@ pub async fn execute_routine(
                 }
                 Some("login_success") => {
                     *routine = Routine::StartSeededGame;
-                    command::play()
+                    command::play_seeded()
                 }
                 Some("ui-push") => match msg_title {
-                    Some(title) if title.contains("species") => {
+                    Some(title) if title.contains("Play a game with a custom seed") => {
                         *routine = Routine::StartSeededGame;
-                        command::press("f")
+                        // clear seed input
+                        command::press("-")
                     }
                     Some(title) if title.contains("background") => {
                         *routine = Routine::StartSeededGame;
@@ -125,8 +182,9 @@ pub async fn execute_routine(
                 | Some("ui_state")
                 | Some("ui-pop")
                 | Some("player")
+                | Some("text_cursor")
                 | Some("update_spectators") => {
-                    *routine = Routine::StartSeededGame;
+                    *routine = Routine::StartGame;
                     None
                 }
                 _ => {
@@ -148,7 +206,8 @@ pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Op
     match command {
         "/hook1" => (Routine::Hook1, None),
         "/hook2" => (Routine::Hook2, None),
-        "/start" => (Routine::StartSeededGame, None),
+        "/start" => (Routine::StartGame, None),
+        "/seeded" => (Routine::StartSeededGame, None),
         _ => {
             logger
                 .log(&format!("unknown repl command: {}\n", command))
@@ -178,6 +237,10 @@ mod command {
 
     pub fn play() -> Option<String> {
         Some(json!({"msg":"play","game_id":"dcss-web-trunk"}).to_string())
+    }
+
+    pub fn play_seeded() -> Option<String> {
+        Some(json!({"msg":"play","game_id":"seeded-web-trunk"}).to_string())
     }
 
     pub fn press(key: &str) -> Option<String> {
