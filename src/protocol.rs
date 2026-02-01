@@ -5,6 +5,7 @@ use serde_json::Value;
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GameMessage {
     pub msg: String,
+    pub title: Option<String>,
     pub cells: Option<Vec<Cell>>,
     #[serde(flatten)]
     pub other: serde_json::Map<String, Value>,

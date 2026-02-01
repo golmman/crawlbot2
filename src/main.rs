@@ -218,13 +218,6 @@ fn spawn_processor(
                     }
                 }
                 protocol::ProcessMessage::Server(val) => {
-                    logger
-                        .log(&format!(
-                            "[PROCES]: processing message '{:?}'\n",
-                            val.get("msg")
-                        ))
-                        .await;
-
                     // Check for ping
                     if val.get("msg").and_then(|m| m.as_str()) == Some("ping") {
                         let tx_inner = tx_sender.clone();
@@ -238,7 +231,6 @@ fn spawn_processor(
 
                     // Process with current routine
                     // Manual peek:
-                    logger.log(&format!("[PROCES]: peeking...\n")).await;
                     peeked = match rx_receiver.try_recv() {
                         Ok(p) => Some(p),
                         Err(_) => None,
@@ -247,12 +239,7 @@ fn spawn_processor(
                         Some(protocol::ProcessMessage::Server(v)) => Some(v),
                         _ => None,
                     };
-
                     let mut routine = current_routine.lock().await;
-
-                    logger
-                        .log(&format!("[PROCES]: executing routine...\n"))
-                        .await;
                     if let Some(outgoing) = commands::execute_routine(
                         &mut *routine,
                         Some(&val),

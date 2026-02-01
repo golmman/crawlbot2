@@ -30,6 +30,7 @@ pub async fn execute_routine(
     };
 
     let msg_type = msg.as_ref().map(|m| m.msg.as_str());
+    let msg_title = msg.as_ref().and_then(|m| m.title.as_deref());
 
     logger
         .log(&format!(
@@ -78,15 +79,56 @@ pub async fn execute_routine(
                 .log("[ROUTIN]: Executing StartSeededGame routine logic\n")
                 .await;
 
-            let result = if msg_type == None {
-                *routine = Routine::StartSeededGame;
-                command::register_random()
-            } else if msg_type == Some("login_success") {
-                *routine = Routine::StartSeededGame;
-                command::play()
-            } else {
-                *routine = Routine::Idle;
-                None
+            let result = match msg_type {
+                None => {
+                    *routine = Routine::StartSeededGame;
+                    command::register_random()
+                }
+                Some("login_success") => {
+                    *routine = Routine::StartSeededGame;
+                    command::play()
+                }
+                Some("ui-push") => {
+                    if let Some(msg_title) = msg_title {
+                        if msg_title.contains("species") {
+                            command::press("f")
+                        } else if msg_title.contains("background") {
+                            command::press("f")
+                        } else {
+                            logger
+                                .log("[ROUTIN]: StartSeededGame aborted, title not recognized\n")
+                                .await;
+                            *routine = Routine::Idle;
+                            None
+                        }
+                    } else {
+                        logger
+                            .log("[ROUTIN]: StartSeededGame aborted, title not recognized\n")
+                            .await;
+                        *routine = Routine::Idle;
+                        None
+                    }
+                }
+                Some("html")
+                | Some("set_game_links")
+                | Some("game_client")
+                | Some("game_started")
+                | Some("chat")
+                | Some("version")
+                | Some("options")
+                | Some("layout")
+                | Some("ui-state-sync")
+                | Some("ui-state")
+                | Some("ui_state")
+                | Some("player")
+                | Some("update_spectators") => {
+                    *routine = Routine::StartSeededGame;
+                    None
+                }
+                _ => {
+                    *routine = Routine::Idle;
+                    None
+                }
             };
 
             result
@@ -132,6 +174,10 @@ mod command {
 
     pub fn play() -> Option<String> {
         Some(json!({"msg":"play","game_id":"dcss-web-trunk"}).to_string())
+    }
+
+    pub fn press(key: &str) -> Option<String> {
+        Some(json!({"msg": "input","text": key}).to_string())
     }
 
     pub fn register() -> Option<String> {
