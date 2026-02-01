@@ -88,27 +88,30 @@ pub async fn execute_routine(
                     *routine = Routine::StartSeededGame;
                     command::play()
                 }
-                Some("ui-push") => {
-                    if let Some(msg_title) = msg_title {
-                        if msg_title.contains("species") {
-                            command::press("f")
-                        } else if msg_title.contains("background") {
-                            command::press("f")
-                        } else {
-                            logger
-                                .log("[ROUTIN]: StartSeededGame aborted, title not recognized\n")
-                                .await;
-                            *routine = Routine::Idle;
-                            None
-                        }
-                    } else {
+                Some("ui-push") => match msg_title {
+                    Some(title) if title.contains("species") => {
+                        *routine = Routine::StartSeededGame;
+                        command::press("f")
+                    }
+                    Some(title) if title.contains("background") => {
+                        *routine = Routine::StartSeededGame;
+                        command::press("f")
+                    }
+                    Some(title) if title.contains("Welcome") => {
+                        logger
+                            .log("[ROUTIN]: StartSeededGame successfully finished\n")
+                            .await;
+                        *routine = Routine::Idle;
+                        command::press("f")
+                    }
+                    _ => {
                         logger
                             .log("[ROUTIN]: StartSeededGame aborted, title not recognized\n")
                             .await;
                         *routine = Routine::Idle;
                         None
                     }
-                }
+                },
                 Some("html")
                 | Some("set_game_links")
                 | Some("game_client")
@@ -120,6 +123,7 @@ pub async fn execute_routine(
                 | Some("ui-state-sync")
                 | Some("ui-state")
                 | Some("ui_state")
+                | Some("ui-pop")
                 | Some("player")
                 | Some("update_spectators") => {
                     *routine = Routine::StartSeededGame;
