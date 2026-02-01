@@ -78,14 +78,18 @@ pub async fn execute_routine(
                 .log("[ROUTIN]: Executing StartSeededGame routine logic\n")
                 .await;
 
-            if msg_type == None {
-                return command::register();
-            } else if msg_type == Some("register_fail") {
-                return command::login();
-            }
+            let result = if msg_type == None {
+                *routine = Routine::StartSeededGame;
+                command::register_random()
+            } else if msg_type == Some("login_success") {
+                *routine = Routine::StartSeededGame;
+                command::play()
+            } else {
+                *routine = Routine::Idle;
+                None
+            };
 
-            *routine = Routine::Idle;
-            None
+            result
         }
     }
 }
@@ -109,7 +113,26 @@ pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Op
 }
 
 mod command {
+    use chrono::Local;
     use serde_json::json;
+
+    pub fn register_random() -> Option<String> {
+        let now = Local::now();
+        let username = format!("dirkle{}", now.format("%Y%m%d%H%M%S"));
+        Some(
+            json!({
+                "msg": "register",
+                "username": username,
+                "password": "aaa",
+                "email": ""
+            })
+            .to_string(),
+        )
+    }
+
+    pub fn play() -> Option<String> {
+        Some(json!({"msg":"play","game_id":"dcss-web-trunk"}).to_string())
+    }
 
     pub fn register() -> Option<String> {
         Some(
