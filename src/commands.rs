@@ -207,6 +207,7 @@ mod command {
         json!({"msg":"key","keycode": keycode}).to_string()
     }
 
+    #[allow(dead_code)]
     pub fn register() -> String {
         json!({
             "msg": "register",
@@ -217,6 +218,7 @@ mod command {
         .to_string()
     }
 
+    #[allow(dead_code)]
     pub fn login() -> String {
         json!({"msg":"login","username":"dirkle","password":"aaa"}).to_string()
     }
