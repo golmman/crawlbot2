@@ -208,14 +208,16 @@ fn spawn_processor(
 
                     let mut messages = outgoing;
                     if messages.is_empty() {
-                        messages = commands::execute_routine(
-                            &mut *routine,
+                        let (new_state, new_messages) = commands::execute_routine(
+                            routine.clone(),
                             None,
                             None,
                             &map_state,
                             &logger,
                         )
                         .await;
+                        *routine = new_state;
+                        messages = new_messages;
                     }
 
                     for msg_str in messages {
@@ -246,14 +248,15 @@ fn spawn_processor(
                     };
                     let mut routine = current_routine.lock().await;
 
-                    let outgoing = commands::execute_routine(
-                        &mut *routine,
+                    let (new_state, outgoing) = commands::execute_routine(
+                        routine.clone(),
                         Some(&val),
                         next_val,
                         &map_state,
                         &logger,
                     )
                     .await;
+                    *routine = new_state;
 
                     for msg_str in outgoing {
                         let _ = tx_sender.send(Message::Text(msg_str.into())).await;
