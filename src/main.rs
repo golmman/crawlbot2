@@ -27,6 +27,8 @@ type WsReceiver = futures_util::stream::SplitStream<
     WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
 >;
 
+const SENDER_DELAY_MS: u64 = 100;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let url_str = "ws://127.0.0.1:8080/socket";
@@ -34,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (ws_sender, ws_receiver) = ws_stream.split();
     let map_state = Arc::new(Mutex::new(MapState::new()));
-    let current_routine = Arc::new(Mutex::new(Routine::Idle));
+    let current_routine = Arc::new(Mutex::new(Routine::Init));
 
     let (rl, stdout) = Readline::new("DCSS    > ".to_string())?;
 
@@ -67,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>, logger: Logger) {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            sleep(Duration::from_millis(2500)).await;
+            sleep(Duration::from_millis(SENDER_DELAY_MS)).await;
             logger.log(&format!("[CLIENT]: {}\n", msg)).await;
             if let Err(e) = ws_sender.send(msg).await {
                 eprintln!("WebSocket send error: {:?}", e);
@@ -246,8 +248,8 @@ fn spawn_processor(
                         Some(protocol::ProcessMessage::Server(v)) => Some(v),
                         _ => None,
                     };
-                    let mut routine = current_routine.lock().await;
 
+                    let mut routine = current_routine.lock().await;
                     let (new_state, outgoing) = commands::execute_routine(
                         routine.clone(),
                         Some(&val),

@@ -8,8 +8,7 @@ use tokio::sync::Mutex;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Routine {
     Idle,
-    Hook1,
-    Hook2,
+    Init,
     StartGame,
     StartSeededGame,
 }
@@ -64,8 +63,11 @@ pub async fn execute_routine(
 
     match routine {
         Routine::Idle => (Routine::Idle, vec![]),
-        Routine::Hook1 => (Routine::Idle, vec![]),
-        Routine::Hook2 => (Routine::Idle, vec![]),
+        Routine::Init => match msg_type {
+            Some("html") => (Routine::StartSeededGame, vec![]),
+            Some("lobby_clear") | Some("lobby_complete") => (Routine::Init, vec![]),
+            _ => (Routine::Idle, vec![]),
+        },
         Routine::StartGame => match msg_type {
             None => (Routine::StartGame, vec![command::register_random()]),
             Some("login_success") => (Routine::StartGame, vec![command::play()]),
@@ -162,8 +164,6 @@ pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Ve
         .await;
 
     match command {
-        "/hook1" => (Routine::Hook1, vec![]),
-        "/hook2" => (Routine::Hook2, vec![]),
         "/start" => (Routine::StartGame, vec![]),
         "/seeded" => (Routine::StartSeededGame, vec![]),
         _ => {
