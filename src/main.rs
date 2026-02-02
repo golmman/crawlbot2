@@ -206,14 +206,19 @@ fn spawn_processor(
                         commands::handle_repl_command(&line, &logger).await;
                     *routine = new_routine;
 
-                    let msg_to_send = if let Some(msg_str) = outgoing {
-                        Some(msg_str)
-                    } else {
-                        commands::execute_routine(&mut *routine, None, None, &map_state, &logger)
-                            .await
-                    };
+                    let mut messages = outgoing;
+                    if messages.is_empty() {
+                        messages = commands::execute_routine(
+                            &mut *routine,
+                            None,
+                            None,
+                            &map_state,
+                            &logger,
+                        )
+                        .await;
+                    }
 
-                    if let Some(msg_str) = msg_to_send {
+                    for msg_str in messages {
                         let _ = tx_sender.send(Message::Text(msg_str.into())).await;
                     }
                 }
@@ -240,16 +245,18 @@ fn spawn_processor(
                         _ => None,
                     };
                     let mut routine = current_routine.lock().await;
-                    if let Some(outgoing) = commands::execute_routine(
+
+                    let outgoing = commands::execute_routine(
                         &mut *routine,
                         Some(&val),
                         next_val,
                         &map_state,
                         &logger,
                     )
-                    .await
-                    {
-                        let _ = tx_sender.send(Message::Text(outgoing.into())).await;
+                    .await;
+
+                    for msg_str in outgoing {
+                        let _ = tx_sender.send(Message::Text(msg_str.into())).await;
                     }
                 }
             }
