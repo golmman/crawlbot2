@@ -93,6 +93,8 @@ components:
   messages:
     # --- Outgoing ---
     Register:
+      title: User Registration
+      summary: Register a new user account on the DCSS server.
       payload:
         type: object
         properties:
@@ -103,6 +105,8 @@ components:
         required: [msg, username, password]
 
     Login:
+      title: User Login
+      summary: Authenticate an existing user.
       payload:
         type: object
         properties:
@@ -112,6 +116,8 @@ components:
         required: [msg, username, password]
 
     Play:
+      title: Start Game
+      summary: Request to start a new game instance.
       payload:
         type: object
         properties:
@@ -120,6 +126,8 @@ components:
         required: [msg, game_id]
 
     InputText:
+      title: Text Input
+      summary: Send a text string (e.g., character name, command) to the game.
       payload:
         type: object
         properties:
@@ -128,6 +136,8 @@ components:
         required: [msg, text]
 
     InputKey:
+      title: Key Input
+      summary: Send a specific keycode (e.g., Enter, Esc) to the game.
       payload:
         type: object
         properties:
@@ -136,6 +146,8 @@ components:
         required: [msg, keycode]
 
     Pong:
+      title: Pong Heartbeat
+      summary: Response to a server-initiated ping to keep the connection alive.
       payload:
         type: object
         properties:
@@ -144,6 +156,8 @@ components:
 
     # --- Incoming ---
     Ping:
+      title: Ping Heartbeat
+      summary: Server-initiated ping to check client liveness.
       payload:
         type: object
         properties:
@@ -151,11 +165,15 @@ components:
         required: [msg]
 
     GameEvent:
+      title: Game State Event
+      summary: Any event sent by the server describing the state of the game (map, UI, player, etc.).
       payload:
         $ref: '#/components/schemas/GameMessage'
 
     # --- Internal ---
     ProcessMessage:
+      title: Process Event
+      summary: Internal message wrapping either a server event or a REPL command for processing.
       description: Discriminated union of Server events and REPL inputs.
       payload:
         oneOf:
@@ -166,6 +184,8 @@ components:
             required: [repl]
 
     WsMessage:
+      title: WebSocket Outgoing Message
+      summary: A raw message string ready to be transmitted over the WebSocket.
       description: Raw message string to be sent via the WebSocket.
       payload:
         type: string
