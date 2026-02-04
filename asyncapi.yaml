@@ -1,0 +1,204 @@
+asyncapi: 3.1.0
+info:
+  title: crawlbot2 Protocol
+  version: 1.0.0
+  description: |
+    Comprehensive specification for the crawlbot2 system, covering external WebSocket 
+    communication with the DCSS game server and internal mpsc channel routing.
+
+operations:
+  # External Operations
+  receiveFromServer:
+    action: receive
+    channel: 
+      $ref: '#/channels/gameServer'
+    messages:
+      - $ref: '#/channels/gameServer/messages/GameEvent'
+      - $ref: '#/channels/gameServer/messages/Ping'
+
+  sendToServer:
+    action: send
+    channel: 
+      $ref: '#/channels/gameServer'
+    messages:
+      - $ref: '#/channels/gameServer/messages/Register'
+      - $ref: '#/channels/gameServer/messages/Login'
+      - $ref: '#/channels/gameServer/messages/Play'
+      - $ref: '#/channels/gameServer/messages/InputText'
+      - $ref: '#/channels/gameServer/messages/InputKey'
+      - $ref: '#/channels/gameServer/messages/Pong'
+
+  # Internal Operations
+  processEvents:
+    description: spawn_processor receiving from rx_receiver
+    action: receive
+    channel:
+      $ref: '#/channels/internalProcessor'
+    messages:
+      - $ref: '#/channels/internalProcessor/messages/ProcessMessage'
+
+  routeToSender:
+    description: spawn_processor sending to tx_sender
+    action: send
+    channel:
+      $ref: '#/channels/internalSender'
+    messages:
+      - $ref: '#/channels/internalSender/messages/WsMessage'
+
+channels:
+  gameServer:
+    address: 'ws://127.0.0.1:8080/socket'
+    messages:
+      # Outgoing
+      Register:
+        $ref: '#/components/messages/Register'
+      Login:
+        $ref: '#/components/messages/Login'
+      Play:
+        $ref: '#/components/messages/Play'
+      InputText:
+        $ref: '#/components/messages/InputText'
+      InputKey:
+        $ref: '#/components/messages/InputKey'
+      Pong:
+        $ref: '#/components/messages/Pong'
+      # Incoming
+      GameEvent:
+        $ref: '#/components/messages/GameEvent'
+      Ping:
+        $ref: '#/components/messages/Ping'
+
+  internalProcessor:
+    address: 'mpsc://tx_receiver'
+    description: Channel combining external server events with local REPL commands.
+    messages:
+      ProcessMessage:
+        $ref: '#/components/messages/ProcessMessage'
+
+  internalSender:
+    address: 'mpsc://tx_sender'
+    description: Channel for messages queued to be sent over the WebSocket.
+    messages:
+      WsMessage:
+        $ref: '#/components/messages/WsMessage'
+
+components:
+  messages:
+    # --- Outgoing ---
+    Register:
+      payload:
+        type: object
+        properties:
+          msg: { const: 'register' }
+          username: { type: string }
+          password: { type: string }
+          email: { type: string }
+        required: [msg, username, password]
+
+    Login:
+      payload:
+        type: object
+        properties:
+          msg: { const: 'login' }
+          username: { type: string }
+          password: { type: string }
+        required: [msg, username, password]
+
+    Play:
+      payload:
+        type: object
+        properties:
+          msg: { const: 'play' }
+          game_id: { type: string, enum: ['dcss-web-trunk', 'seeded-web-trunk'] }
+        required: [msg, game_id]
+
+    InputText:
+      payload:
+        type: object
+        properties:
+          msg: { const: 'input' }
+          text: { type: string }
+        required: [msg, text]
+
+    InputKey:
+      payload:
+        type: object
+        properties:
+          msg: { const: 'key' }
+          keycode: { type: integer }
+        required: [msg, keycode]
+
+    Pong:
+      payload:
+        type: object
+        properties:
+          msg: { const: 'pong' }
+        required: [msg]
+
+    # --- Incoming ---
+    Ping:
+      payload:
+        type: object
+        properties:
+          msg: { const: 'ping' }
+        required: [msg]
+
+    GameEvent:
+      payload:
+        $ref: '#/components/schemas/GameMessage'
+
+    # --- Internal ---
+    ProcessMessage:
+      description: Discriminated union of Server events and REPL inputs.
+      payload:
+        oneOf:
+          - $ref: '#/components/schemas/GameMessage'
+          - type: object
+            properties:
+              repl: { type: string }
+            required: [repl]
+
+    WsMessage:
+      description: Raw message to be sent via Tungstenite.
+      payload:
+        type: string
+
+  schemas:
+    GameMessage:
+      type: object
+      properties:
+        msg: 
+          type: string
+          enum:
+            - 'html'
+            - 'lobby_clear'
+            - 'lobby_complete'
+            - 'login_success'
+            - 'ui-push'
+            - 'ui-pop'
+            - 'set_game_links'
+            - 'game_client'
+            - 'game_started'
+            - 'chat'
+            - 'version'
+            - 'options'
+            - 'layout'
+            - 'ui-state-sync'
+            - 'ui-state'
+            - 'ui_state'
+            - 'player'
+            - 'update_spectators'
+            - 'text_cursor'
+            - 'map'
+        title: { type: string }
+        cells: 
+          type: array
+          items: { $ref: '#/components/schemas/Cell' }
+      required: [msg]
+
+    Cell:
+      type: object
+      properties:
+        x: { type: integer }
+        y: { type: integer }
+        g: { type: string, description: 'The character/glyph for this cell' }
