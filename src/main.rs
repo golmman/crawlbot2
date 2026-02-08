@@ -3,8 +3,7 @@ mod logger;
 mod map;
 mod protocol;
 
-use crate::protocol::normalize_messages;
-use commands::Routine;
+use crate::protocol::{GameMessage, Routine, RoutineMessage, normalize_messages};
 use flate2::{Decompress, FlushDecompress};
 use futures_util::SinkExt;
 use futures_util::StreamExt;
@@ -45,28 +44,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .log("Connected. Forcing Manual Decompression...\n")
         .await;
 
-    // Channel for sending messages to the WebSocket
-    let (tx_sender, rx_sender) = mpsc::channel::<Message>(32);
-    // Channel for incoming messages (Server + Repl)
-    let (tx_receiver, rx_receiver) = mpsc::channel::<protocol::ProcessMessage>(32);
+    // 1. Game Server Output Channel
+    let (output_tx, output_rx) = mpsc::channel::<Message>(32);
+    
+    // 2. Routine Channel
+    let (routine_tx, routine_rx) = mpsc::channel::<RoutineMessage>(32);
 
-    spawn_sender(ws_sender, rx_sender, logger.clone());
-    spawn_receiver(ws_receiver, tx_receiver.clone(), logger.clone());
+    // Spawn Game Server Output Handler
+    spawn_output_handler(ws_sender, output_rx, logger.clone());
 
-    spawn_processor(
-        rx_receiver,
-        tx_sender,
+    // Spawn Game Server Input Handler
+    spawn_input_handler(
+        ws_receiver,
+        output_tx.clone(),
+        routine_tx.clone(),
+        logger.clone(),
+    );
+
+    // Spawn Routine Handler
+    spawn_routine_handler(
+        routine_rx,
+        routine_tx.clone(),
+        output_tx.clone(),
         Arc::clone(&map_state),
         Arc::clone(&current_routine),
         logger.clone(),
     );
 
-    run_repl(rl, logger, tx_receiver, current_routine).await?;
+    // Run Repl Handler
+    run_repl(rl, logger, output_tx, routine_tx).await?;
 
     Ok(())
 }
 
-fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>, logger: Logger) {
+fn spawn_output_handler(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>, logger: Logger) {
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             sleep(Duration::from_millis(SENDER_DELAY_MS)).await;
@@ -79,9 +90,10 @@ fn spawn_sender(mut ws_sender: WsSender, mut rx: mpsc::Receiver<Message>, logger
     });
 }
 
-fn spawn_receiver(
+fn spawn_input_handler(
     mut ws_receiver: WsReceiver,
-    tx_receiver: mpsc::Sender<protocol::ProcessMessage>,
+    output_tx: mpsc::Sender<Message>,
+    routine_tx: mpsc::Sender<RoutineMessage>,
     logger: Logger,
 ) {
     tokio::spawn(async move {
@@ -97,7 +109,8 @@ fn spawn_receiver(
                         &sync_buffer,
                         &mut decompressor,
                         &mut buffer,
-                        &tx_receiver,
+                        &output_tx,
+                        &routine_tx,
                         &logger,
                     )
                     .await;
@@ -123,7 +136,8 @@ async fn handle_binary_message(
     sync_buffer: &[u8],
     decompressor: &mut Decompress,
     buffer: &mut Vec<u8>,
-    tx_receiver: &mpsc::Sender<protocol::ProcessMessage>,
+    output_tx: &mpsc::Sender<Message>,
+    routine_tx: &mpsc::Sender<RoutineMessage>,
     logger: &Logger,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut input = data;
@@ -168,9 +182,20 @@ async fn handle_binary_message(
             logger.log(&format!("[SERVER]: {}\n", value)).await;
 
             for msg_val in normalize_messages(value) {
-                tx_receiver
-                    .send(protocol::ProcessMessage::Server(msg_val))
-                    .await?;
+                // Check if it is a ping message
+                if msg_val.get("msg").and_then(|m| m.as_str()) == Some("ping") {
+                    let _ = output_tx.send(Message::Text(r#"{"msg":"pong"}"#.into())).await;
+                } else {
+                    // Try to deserialize to GameMessage
+                    match serde_json::from_value::<GameMessage>(msg_val) {
+                        Ok(game_msg) => {
+                            let _ = routine_tx.send(RoutineMessage::GameMessage(game_msg)).await;
+                        }
+                        Err(e) => {
+                            logger.log(&format!("Failed to parse game message: {:?}\n", e)).await;
+                        }
+                    }
+                }
             }
         }
 
@@ -182,86 +207,52 @@ async fn handle_binary_message(
     Ok(())
 }
 
-fn spawn_processor(
-    mut rx_receiver: mpsc::Receiver<protocol::ProcessMessage>,
-    tx_sender: mpsc::Sender<Message>,
+fn spawn_routine_handler(
+    mut routine_rx: mpsc::Receiver<RoutineMessage>,
+    routine_tx: mpsc::Sender<RoutineMessage>,
+    output_tx: mpsc::Sender<Message>,
     map_state: Arc<Mutex<MapState>>,
     current_routine: Arc<Mutex<Routine>>,
     logger: Logger,
 ) {
     tokio::spawn(async move {
-        let mut peeked: Option<protocol::ProcessMessage> = None;
-
-        loop {
-            let msg = if let Some(m) = peeked.take() {
-                Some(m)
-            } else {
-                rx_receiver.recv().await
-            };
-
-            let Some(msg) = msg else { break };
-
+        while let Some(msg) = routine_rx.recv().await {
             match msg {
-                protocol::ProcessMessage::Repl(line) => {
-                    let mut routine = current_routine.lock().await;
-                    let (new_routine, outgoing) =
-                        commands::handle_repl_command(&line, &logger).await;
-                    *routine = new_routine;
-
-                    let mut messages = outgoing;
-                    if messages.is_empty() {
-                        let (new_state, new_messages) = commands::execute_routine(
-                            routine.clone(),
-                            None,
-                            None,
-                            &map_state,
-                            &logger,
-                        )
-                        .await;
-                        *routine = new_state;
-                        messages = new_messages;
-                    }
-
-                    for msg_str in messages {
-                        let _ = tx_sender.send(Message::Text(msg_str.into())).await;
-                    }
-                }
-                protocol::ProcessMessage::Server(val) => {
-                    // Check for ping
-                    if val.get("msg").and_then(|m| m.as_str()) == Some("ping") {
-                        let tx_inner = tx_sender.clone();
-                        tokio::spawn(async move {
-                            let _ = tx_inner
-                                .send(Message::Text(r#"{"msg":"pong"}"#.into()))
-                                .await;
-                        });
-                        continue;
-                    }
-
-                    // Process with current routine
-                    // Manual peek:
-                    peeked = match rx_receiver.try_recv() {
-                        Ok(p) => Some(p),
-                        Err(_) => None,
-                    };
-                    let next_val = match &peeked {
-                        Some(protocol::ProcessMessage::Server(v)) => Some(v),
-                        _ => None,
-                    };
-
-                    let mut routine = current_routine.lock().await;
-                    let (new_state, outgoing) = commands::execute_routine(
-                        routine.clone(),
-                        Some(&val),
-                        next_val,
+                RoutineMessage::Override(new_routine) => {
+                    let mut routine_store = current_routine.lock().await;
+                    *routine_store = new_routine;
+                    
+                    // Execute immediately after override
+                    let (next_routine_opt, outgoing) = commands::execute_routine(
+                        routine_store.clone(),
+                        None,
                         &map_state,
                         &logger,
-                    )
-                    .await;
-                    *routine = new_state;
+                    ).await;
 
-                    for msg_str in outgoing {
-                        let _ = tx_sender.send(Message::Text(msg_str.into())).await;
+                    if let Some(next_routine) = next_routine_opt {
+                         let _ = routine_tx.send(RoutineMessage::Override(next_routine)).await;
+                    }
+                    
+                    for out_msg in outgoing {
+                        let _ = output_tx.send(Message::Text(out_msg.into())).await;
+                    }
+                }
+                RoutineMessage::GameMessage(game_msg) => {
+                   let routine_store = current_routine.lock().await;
+                   let (next_routine_opt, outgoing) = commands::execute_routine(
+                        routine_store.clone(),
+                        Some(game_msg),
+                        &map_state,
+                        &logger,
+                    ).await;
+
+                    if let Some(next_routine) = next_routine_opt {
+                         let _ = routine_tx.send(RoutineMessage::Override(next_routine)).await;
+                    }
+                    
+                    for out_msg in outgoing {
+                        let _ = output_tx.send(Message::Text(out_msg.into())).await;
                     }
                 }
             }
@@ -272,8 +263,8 @@ fn spawn_processor(
 async fn run_repl(
     mut rl: Readline,
     logger: Logger,
-    tx_receiver: mpsc::Sender<protocol::ProcessMessage>,
-    _current_routine: Arc<Mutex<Routine>>,
+    output_tx: mpsc::Sender<Message>,
+    routine_tx: mpsc::Sender<RoutineMessage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         match rl.readline().await {
@@ -282,17 +273,15 @@ async fn run_repl(
                 if line.is_empty() {
                     continue;
                 }
+                rl.add_history_entry(line.to_string());
 
                 if line.starts_with('/') {
-                    tx_receiver
-                        .send(protocol::ProcessMessage::Repl(line.to_string()))
-                        .await?;
+                     if let Some(new_routine) = commands::handle_repl_command(line, &logger).await {
+                         let _ = routine_tx.send(RoutineMessage::Override(new_routine)).await;
+                     }
                 } else {
-                    tx_receiver
-                        .send(protocol::ProcessMessage::Repl(line.to_string()))
-                        .await?;
+                    let _ = output_tx.send(Message::Text(line.into())).await;
                 }
-                rl.add_history_entry(line.to_string());
             }
             Ok(ReadlineEvent::Eof) | Ok(ReadlineEvent::Interrupted) => break,
             Err(e) => {

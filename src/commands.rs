@@ -1,33 +1,18 @@
 use crate::logger::Logger;
 use crate::map::MapState;
-use crate::protocol::GameMessage;
-use serde_json::Value;
+use crate::protocol::{GameMessage, Routine};
+
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Routine {
-    Idle,
-    Init,
-    StartGame,
-    StartSeededGame,
-}
+
 
 pub async fn execute_routine(
     routine: Routine,
-    current: Option<&Value>,
-    _next: Option<&Value>,
+    msg: Option<GameMessage>,
     map_state: &Arc<Mutex<MapState>>,
     logger: &Logger,
-) -> (Routine, Vec<String>) {
-    let msg = if let Some(current_val) = current {
-        match serde_json::from_value::<GameMessage>(current_val.clone()) {
-            Ok(m) => Some(m),
-            Err(_) => return (routine, vec![]),
-        }
-    } else {
-        None
-    };
+) -> (Option<Routine>, Vec<String>) {
 
     let msg_type = msg.as_ref().map(|m| m.msg.as_str());
     let msg_title = msg.as_ref().and_then(|m| m.title.as_deref());
@@ -62,33 +47,33 @@ pub async fn execute_routine(
         .await;
 
     match routine {
-        Routine::Idle => (Routine::Idle, vec![]),
+        Routine::Idle => (None, vec![]),
         Routine::Init => match msg_type {
-            Some("html") => (Routine::StartSeededGame, vec![]),
-            Some("lobby_clear") | Some("lobby_complete") => (Routine::Init, vec![]),
-            _ => (Routine::Idle, vec![]),
+            Some("html") => (Some(Routine::StartSeededGame), vec![]),
+            Some("lobby_clear") | Some("lobby_complete") => (None, vec![]),
+            _ => (None, vec![]),
         },
         Routine::StartGame => match msg_type {
-            None => (Routine::StartGame, vec![command::register_random()]),
-            Some("login_success") => (Routine::StartGame, vec![command::play()]),
+            None => (None, vec![command::register_random()]),
+            Some("login_success") => (None, vec![command::play()]),
             Some("ui-push") => match msg_title {
                 Some(title) if title.contains("species") => {
-                    (Routine::StartGame, vec![command::send_text("f")])
+                    (None, vec![command::send_text("f")])
                 }
                 Some(title) if title.contains("background") => {
-                    (Routine::StartGame, vec![command::send_text("f")])
+                    (None, vec![command::send_text("f")])
                 }
                 Some(title) if title.contains("Welcome") => {
                     logger
                         .log("[ROUTIN]: StartSeededGame successfully finished\n")
                         .await;
-                    (Routine::Idle, vec![command::send_text("f")])
+                    (Some(Routine::Idle), vec![command::send_text("f")])
                 }
                 _ => {
                     logger
                         .log("[ROUTIN]: StartSeededGame aborted, title not recognized\n")
                         .await;
-                    (Routine::Idle, vec![])
+                    (Some(Routine::Idle), vec![])
                 }
             },
             Some("html")
@@ -104,15 +89,15 @@ pub async fn execute_routine(
             | Some("ui_state")
             | Some("ui-pop")
             | Some("player")
-            | Some("update_spectators") => (Routine::StartGame, vec![]),
-            _ => (Routine::Idle, vec![]),
+            | Some("update_spectators") => (None, vec![]),
+            _ => (None, vec![]),
         },
         Routine::StartSeededGame => match msg_type {
-            None => (Routine::StartSeededGame, vec![command::register_random()]),
-            Some("login_success") => (Routine::StartSeededGame, vec![command::play_seeded()]),
+            None => (None, vec![command::register_random()]),
+            Some("login_success") => (None, vec![command::play_seeded()]),
             Some("ui-push") => match msg_title {
                 Some(title) if title.contains("Play a game with a custom seed") => (
-                    Routine::StartSeededGame,
+                    None,
                     vec![
                         command::send_text("-"),
                         command::send_text("122333"),
@@ -120,22 +105,22 @@ pub async fn execute_routine(
                     ],
                 ),
                 Some(title) if title.contains("Please select your species") => {
-                    (Routine::StartSeededGame, vec![command::send_text("f")])
+                    (None, vec![command::send_text("f")])
                 }
                 Some(title) if title.contains("Please select your background") => {
-                    (Routine::StartSeededGame, vec![command::send_text("f")])
+                    (None, vec![command::send_text("f")])
                 }
                 Some(title) if title.contains("Welcome") => {
                     logger
                         .log("[ROUTIN]: StartSeededGame successfully finished\n")
                         .await;
-                    (Routine::Idle, vec![command::send_text("f")])
+                    (Some(Routine::Idle), vec![command::send_text("f")])
                 }
                 _ => {
                     logger
                         .log("[ROUTIN]: StartSeededGame aborted, title not recognized\n")
                         .await;
-                    (Routine::Idle, vec![])
+                    (Some(Routine::Idle), vec![])
                 }
             },
             Some("html")
@@ -152,25 +137,25 @@ pub async fn execute_routine(
             | Some("ui-pop")
             | Some("player")
             | Some("text_cursor")
-            | Some("update_spectators") => (Routine::StartSeededGame, vec![]),
-            _ => (Routine::Idle, vec![]),
+            | Some("update_spectators") => (None, vec![]),
+            _ => (None, vec![]),
         },
     }
 }
 
-pub async fn handle_repl_command(command: &str, logger: &Logger) -> (Routine, Vec<String>) {
+pub async fn handle_repl_command(command: &str, logger: &Logger) -> Option<Routine> {
     logger
         .log(&format!("[REPL  ]: handling repl command '{}'\n", command))
         .await;
 
     match command {
-        "/start" => (Routine::StartGame, vec![]),
-        "/seeded" => (Routine::StartSeededGame, vec![]),
+        "/start" => Some(Routine::StartGame),
+        "/seeded" => Some(Routine::StartSeededGame),
         _ => {
             logger
                 .log(&format!("unknown repl command: {}\n", command))
                 .await;
-            (Routine::Idle, vec![command.to_string()])
+            None
         }
     }
 }
